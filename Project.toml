@@ -1,0 +1,16 @@
+name = "SLAM"
+uuid = "19785598-f67e-4679-8628-98de2a9de9c8"
+authors = ["Anton Smirnov <anton.smn@protonmail.com>"]
+version = "0.1.0"
+
+[deps]
+ImageFeatures = "92ff4b2b-8094-53d3-b29d-97f740f06cef"
+ImageMagick = "6218d12a-5da1-5696-b52f-db25d2ecc6d1"
+ImageTracking = "7632190a-71f5-11e9-04ef-99e081817785"
+Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+Manifolds = "1cead3c2-87b3-11e9-0ccd-23c62b72b94e"
+Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
+Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+TransformUtils = "9b8138ad-1b09-5408-aa39-e87ed6d21b63"
+VideoIO = "d6d074c3-1acf-5d4c-9a43-ef38773959a2"
