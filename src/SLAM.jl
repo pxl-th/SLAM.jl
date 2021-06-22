@@ -16,6 +16,20 @@ using Manifolds
 const Point2i = Point2{Int64}
 const Point2f = Point2{Float64}
 
+@inline convert(x::Point2)::Point2i = x .|> round .|> Int64
+@inline convert(x::Vector{Point2f}) =
+    Point2i[xi .|> round .|> Int64 for xi in x]
+
+@inline function to_cartesian(x::Point2)
+    x = x |> convert
+    CartesianIndex(x[2], x[1])
+end
+
+@inline function to_cartesian(x::Point2, cell_size::Int64)
+    x = convert(x) .÷ cell_size
+    CartesianIndex(x[2], x[1])
+end
+
 include("extractor.jl")
 
 function expand(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
@@ -30,27 +44,7 @@ function extract_fast(image, n_keypoints::Int64, threshold::Float64 = 0.4)
     fastcorners(image, n_keypoints, threshold) |> Keypoints
 end
 
-mutable struct Frame
-    id::Int64
-    kfid::Int64
-    time::Float64
-    # pose cam -> world
-    cw::SMatrix{4, 4, Float64}
-    # pose world -> cam
-    wc::SMatrix{4, 4, Float64}
-    # calibration model (camera)
-    # map of observed keypoints
-    # nb_keypoints::Int64
-    # nb_occupied_cells::Int64
-end
-
-function Frame(;
-    id::Int64 = 0, kfid::Int64 = 0, time::Float64 = 0.0,
-    cw::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
-    wc::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
-)
-    Frame(id, kfid, time, cw, wc)
-end
+include("frame.jl")
 
 struct KeyFrame
     id::Int64
@@ -101,33 +95,35 @@ Immediate TODO:
 - feature tracker
 - compute pose 2d-3d
 - slam state
-- Keypoint struct
-- detect grid fast extractor
++ Keypoint struct
++ extractor
+- camera calibration
 """
 
 function main()
     reader = VideoIO.openvideo("./data/5.hevc")
 
-    ex = Extractor(1000)
+    ex = Extractor(2000, BRIEF())
 
-    for frame in reader
+    for (i, frame) in enumerate(reader)
+        @show i
         frame = frame .|> Gray
-        @show typeof(frame), size(frame)
-
-        (grad_x, grad_y) = imgradients(frame, KernelFactors.sobel, "replicate")
-        @show size(grad_x), size(grad_y)
+        @show size(frame), typeof(frame)
 
         kps = detect(ex, frame, [])
-        kps = kps |> convert
         @show length(kps)
+        descriptors, kps = describe(ex, frame, kps)
+        @show length(kps)
+        @show typeof(descriptors)
 
         frame = frame .|> RGB
-        for kp in kps
-            frame[kp[2], kp[1]] = RGB(1, 0, 0)
+        for (kp, dp) in zip(kps, descriptors)
+            frame[kp] = RGB(1, 0, 0)
+            Keypoint(1, kp, dp)
         end
 
-        save("frame.jpg", frame)
-        break
+        save("frame-$i.jpg", frame)
+        i == 20 && break
     end
 
     reader |> close

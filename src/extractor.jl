@@ -1,12 +1,10 @@
 struct Extractor
     max_points::Int64
+    descriptor::BRIEF
 end
 
 @inline convert(x::Vector{HomogeneousPoint{Float64, 3}}) =
     map(p -> Point2f(p.coords[1], p.coords[2]), x)
-
-@inline convert(x::Vector{Point2f}) =
-    Point2i[xi .|> round .|> Int64 for xi in x]
 
 function _shi_tomasi(image, n_keypoints::Int64)
     corners = fill(false, size(image)...)
@@ -25,6 +23,10 @@ function _shi_tomasi(image, n_keypoints::Int64)
     corners, responses, nb_detected
 end
 
+"""
+TODO roi support
+TODO mask support
+"""
 function detect(e::Extractor, image, current_points)
     length(current_points) ≥ e.max_points && return Point2f[]
 
@@ -32,5 +34,13 @@ function detect(e::Extractor, image, current_points)
     corners, responses, nb_detected = _shi_tomasi(image, δ)
     nb_detected == 0 && return Point2f[]
 
-    corner2subpixel(responses, corners) |> convert
+    # sub_pixels = corner2subpixel(responses, corners) |> convert
+    Keypoints(corners)
+end
+
+"""
+TODO return filtered ids to support sub_pixel filtering
+"""
+function describe(e::Extractor, image, keypoints)
+    create_descriptor(image, keypoints, e.descriptor)
 end
