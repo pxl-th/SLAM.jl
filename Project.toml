@@ -4,6 +4,7 @@ authors = ["Anton Smirnov <anton.smn@protonmail.com>"]
 version = "0.1.0"
 
 [deps]
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 ImageFeatures = "92ff4b2b-8094-53d3-b29d-97f740f06cef"
 ImageMagick = "6218d12a-5da1-5696-b52f-db25d2ecc6d1"
 ImageTracking = "7632190a-71f5-11e9-04ef-99e081817785"

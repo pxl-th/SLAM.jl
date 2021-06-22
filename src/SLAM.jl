@@ -3,11 +3,20 @@ module SLAM
 using LinearAlgebra
 
 using StaticArrays
+using GeometryBasics
 using Images
 using ImageFeatures
 using VideoIO
 using Rotations
 using Manifolds
+
+"""
+2D Point in (x, y) format.
+"""
+const Point2i = Point2{Int64}
+const Point2f = Point2{Float64}
+
+include("extractor.jl")
 
 function expand(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
     m = vcat(m, SMatrix{1, 3, T}(0, 0, 0))
@@ -99,14 +108,28 @@ Immediate TODO:
 function main()
     reader = VideoIO.openvideo("./data/5.hevc")
 
+    ex = Extractor(1000)
+
     for frame in reader
         frame = frame .|> Gray
         @show typeof(frame), size(frame)
+
+        kps = detect(ex, frame, [])
+        kps = kps |> convert
+        @show length(kps)
+
+        frame = frame .|> RGB
+        for kp in kps
+            frame[kp[2], kp[1]] = RGB(1, 0, 0)
+        end
+
+        save("frame.jpg", frame)
+        break
     end
 
     reader |> close
 end
-# main()
+main()
 
 function test_motion()
     model = MotionModel()
@@ -124,6 +147,6 @@ function test_motion()
     @show x
     update!(model, x, 2)
 end
-test_motion()
+# test_motion()
 
 end
