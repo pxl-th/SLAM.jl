@@ -114,6 +114,9 @@ function main()
         frame = frame .|> Gray
         @show typeof(frame), size(frame)
 
+        (grad_x, grad_y) = imgradients(frame, KernelFactors.sobel, "replicate")
+        @show size(grad_x), size(grad_y)
+
         kps = detect(ex, frame, [])
         kps = kps |> convert
         @show length(kps)
