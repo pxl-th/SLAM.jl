@@ -59,7 +59,7 @@ struct MapManager
 
     nb_keyframes::Int64
 
-    # params::Params
+    params::Params
     extractor::Extractor
     # tracker::Tracker
 

@@ -17,7 +17,7 @@ function track(fe::FrontEnd, image, time)
     is_kf_required = track_mono(fe, image, time)
     if is_kf_required
         create_keyframe!(fe.map_manager, image)
-        # TODO build optial flow pyramid adnd reuse it in optical flow
+        # TODO build optial flow pyramid and reuse it in optical flow
     end
 end
 

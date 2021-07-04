@@ -44,6 +44,7 @@ function extract_fast(image, n_keypoints::Int64, threshold::Float64 = 0.4)
     fastcorners(image, n_keypoints, threshold) |> Keypoints
 end
 
+include("params.jl")
 include("frame.jl")
 
 struct KeyFrame
@@ -92,11 +93,12 @@ Immediate TODO:
 + image preprocessing
 + map manager: create kf (prepare, extract, add)
 + motion model
++ Keypoint struct
++ feature extractor
++ slam state (params)
+
 - feature tracker
 - compute pose 2d-3d
-- slam state
-+ Keypoint struct
-+ extractor
 - camera calibration
 """
 
