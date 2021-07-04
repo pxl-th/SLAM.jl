@@ -1,9 +1,9 @@
 mutable struct FrontEnd
     current_frame::Frame
     motion_model::MotionModel
-    # motion model
     # feature tracker
-    # map manager
+    map_manager::MapManager
+
     current_image::Matrix{Gray}
     previous_image::Matrix{Gray}
 end
@@ -16,8 +16,8 @@ FrontEnd(frame::Frame) = FrontEnd(
 function track(fe::FrontEnd, image, time)
     is_kf_required = track_mono(fe, image, time)
     if is_kf_required
-        # create_keyframe(fe.map_manager, )
-        # build optial flow pyramid
+        create_keyframe!(fe.map_manager, image)
+        # TODO build optial flow pyramid adnd reuse it in optical flow
     end
 end
 

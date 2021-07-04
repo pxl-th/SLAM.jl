@@ -90,7 +90,7 @@ end
 """
 Immediate TODO:
 + image preprocessing
-- map manager: create kf (prepare, extract, add)
++ map manager: create kf (prepare, extract, add)
 + motion model
 - feature tracker
 - compute pose 2d-3d

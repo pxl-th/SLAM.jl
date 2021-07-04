@@ -28,6 +28,11 @@ struct MapPoint
     is_observed::Bool
 end
 
+MapPoint(::Val{:invalid}) = MapPoint(
+    -1, -1, Set{Int64}(), BitVector(), Dict{Int64, BitVector},
+    Point3f0(), 0f0, false, false,
+)
+
 function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
     observed_keyframes_ids = Set{Int64}(kfid)
     keyframes_descriptors = Dict{Int64, BitVector}(kfid => descriptor)
@@ -43,9 +48,14 @@ function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
     )
 end
 
+@inline is_valid(m::MapPoint)::Bool = m.id != -1
+
+@inline add_keyframe_observation!(m::MapPoint, id::Int64) =
+    push!(m.observer_keyframes_ids, id)
+
 struct MapManager
     current_frame::Frame
-    map_frames::Dict{Int64, Frame}
+    frames_map::Dict{Int64, Frame}
 
     nb_keyframes::Int64
 
@@ -62,7 +72,7 @@ end
 function create_keyframe!(m::MapManager, image)
     prepare_frame!(m)
     extract_keypoints!(m, image)
-    # TODO add_keyframe
+    add_keyframe!(m)
 end
 
 function prepare_frame!(m::MapManager)
@@ -73,10 +83,15 @@ function prepare_frame!(m::MapManager)
     #     # TODO
     # end
 
-    for kp in get_keypoints(m.current_frame)
+    for keypoint in get_keypoints(m.current_frame)
         # Get related MapPoint.
-        # if kp is not in the map (map_plms), then remove it
-        # else link it to the current frame kfid = m.nb_keyframes
+        mp = get(m.map_points, keypoint.id, MapPoint(Val{:invalid}))
+        if !is_valid(mp)
+            remove_obs_from_current_frame!(m, keypoint.id)
+            continue
+        end
+        # Link new Keyframe to the MapPoint.
+        add_keyframe_observation!(mp, m.current_keyframe_id)
     end
 end
 
@@ -114,4 +129,27 @@ function add_mappoint!(m::MapManager, descriptor)
     m.map_points[m.current_mappoint_id] = new_mappoint
     m.current_mappoint_id += 1
     m.nb_mappoints += 1
+end
+
+"""
+Copy current MapManager's Frame and add it to the KeyFrame map.
+Increase current keyframe id & total number of keyframes.
+"""
+function add_keyframe!(m::MapManager)
+    m.frames_map[m.current_keyframe_id, deepcopy(m.current_frame)]
+    m.current_keyframe_id += 1
+    m.nb_keyframes += 1
+end
+
+"""
+Remove a MapPoint observation from current Frame by `id`.
+"""
+function remove_obs_from_current_frame!(m::MapManager, id::Int64)
+    remove_keypoint!(m.current_frame, id)
+    # TODO visualization related part. Point-cloud point removal.
+    # Set MapPoint as not observable.
+    # if !(id in keys(m.map_points))
+    #     # TODO Reset point in point-cloud to origin-point.
+    #     return
+    # end
 end
