@@ -11,7 +11,6 @@ mutable struct MotionModel
     Element of se(3) algebra.
     """
     log_rel_t::SMatrix{4, 4, Float64}
-    manifold::SpecialEuclidean{3}
 end
 
 function MotionModel(;
@@ -19,7 +18,7 @@ function MotionModel(;
     prev_wc::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
     log_rel_t::SMatrix{4, 4, Float64} = zeros(SMatrix{4, 4, Float64}),
 )
-    MotionModel(prev_time, prev_wc, log_rel_t, SpecialEuclidean(3))
+    MotionModel(prev_time, prev_wc, log_rel_t)
 end
 
 function reset!(m::MotionModel)
@@ -35,12 +34,12 @@ function (m::MotionModel)(wc::SMatrix{4, 4, Float64}, time)
     # wc and m.prev_wc should be equal here,
     # since prev_wc is updated right after pose computation.
     # If not, which can happen after Loop Closing, update to stay consistent.
-    δ = group_log(m.manifold, wc * inv(m.manifold, m.prev_wc))
+    δ = group_log(SE3, wc * inv(SE3, m.prev_wc))
     if isapprox.(δ, 0; atol=1e-5) |> all
         m.prev_wc = wc
     end
     δt = time - m.prev_time
-    wc * group_exp(m.manifold, m.log_rel_t .* δt)
+    wc * group_exp(SE3, m.log_rel_t .* δt)
 end
 
 function update!(m::MotionModel, wc::SMatrix{4, 4, Float64}, time)
@@ -57,7 +56,7 @@ function update!(m::MotionModel, wc::SMatrix{4, 4, Float64}, time)
         "Previous time $(m.prev_time) vs time $time."
     )
 
-    new_rel = inv(m.manifold, m.prev_wc) * wc
-    m.log_rel_t = group_log(m.manifold, new_rel) ./ δt
+    new_rel = inv(SE3, m.prev_wc) * wc
+    m.log_rel_t = group_log(SE3, new_rel) ./ δt
     m.prev_wc = wc
 end

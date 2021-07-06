@@ -16,6 +16,8 @@ using Manifolds
 const Point2i = Point2{Int64}
 const Point2f = Point2{Float64}
 
+const SE3 = SpecialEuclidean(3)
+
 @inline convert(x::Point2)::Point2i = x .|> round .|> Int64
 @inline convert(x::Vector{Point2f}) =
     Point2i[xi .|> round .|> Int64 for xi in x]
@@ -30,12 +32,12 @@ end
     CartesianIndex(x[2], x[1])
 end
 
-include("extractor.jl")
-
 function expand(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
     m = vcat(m, SMatrix{1, 3, T}(0, 0, 0))
     hcat(m, SVector{4, T}(0, 0, 0, 1))
 end
+
+include("extractor.jl")
 
 # - Visual front end processes each image (and creates keyframes via mapmanager)
 # - Puts Keyframes into Mapper
@@ -99,6 +101,7 @@ Immediate TODO:
 
 - feature tracker
 - compute pose 2d-3d
+
 - camera calibration
 """
 
@@ -130,7 +133,7 @@ function main()
 
     reader |> close
 end
-main()
+# main()
 
 function test_motion()
     model = MotionModel()
@@ -148,6 +151,6 @@ function test_motion()
     @show x
     update!(model, x, 2)
 end
-# test_motion()
+test_motion()
 
 end

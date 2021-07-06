@@ -116,3 +116,8 @@ function remove_keypoint_from_grid!(f::Frame, keypoint::Keypoint)
         isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells -= 1)
     end
 end
+
+function set_transformation!(f::Frame, wc::SMatrix{4, 4, Float32})
+    f.wc = wc
+    f.cw = inv(SE3, wc)
+end

@@ -25,9 +25,12 @@ function track_mono(fe::FrontEnd, image, time)::Bool
     preprocess(fe, image)
     # If it's the first frame, then KeyFrame is always needed.
     fe.current_frame.id == 1 && return true
-    # apply motion model
-    fe.current_frame.wc = fe.motion_model(fe.current_frame.wc, time)
+    # Apply motion model & update current Frame pose.
+    set_transformation!(
+        fe.current_frame, fe.motion_model(fe.current_frame.wc, time),
+    )
     # track new image
+    # epipolar filtering
     # compute pose 2d-3d
     # update motion model
     # check if new kf required
