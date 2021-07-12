@@ -1,7 +1,7 @@
 struct Keypoint
     id::Int64
     """
-    Coordinates of a keypoint in (X, Y) format.
+    Coordinates of a keypoint in (Y, X) format.
     """
     pixel::Point2f
     undistorted_pixel::Point2f
@@ -117,7 +117,12 @@ function remove_keypoint_from_grid!(f::Frame, keypoint::Keypoint)
     end
 end
 
-function set_transformation!(f::Frame, wc::SMatrix{4, 4, Float32})
+function set_wc!(f::Frame, wc::SMatrix{4, 4, Float32})
     f.wc = wc
     f.cw = inv(SE3, wc)
+end
+
+function set_cw!(f::Frame, cw::SMatrix{4, 4, Float32})
+    f.cw = cw
+    f.wc = inv(SE3, cw)
 end
