@@ -2,21 +2,51 @@
 Perform Forward-Backward Lucas-Kanade optical flow tracking.
 
 Params:
-    keypoints::Vector{Point2f} -->> TODO ODODODO <<--
-        Vector of 2d keypoints in (row, col) format which to track.
+    keypoints::Vector{Point2f}
+        Vector of 2d keypoints in `(row, col)` format which to track.
 """
 function fb_tracking(
     previous_image, current_image, keypoints;
     nb_iterations::Int = 30, window_size::Int = 11, pyramid_levels::Int = 3,
     max_distance::Real = 0.5,
 )
-    isempty(keypoints) && return
-
-    new_points = Vector{SVector{2, Float64}}(undef, length(keypoints))
+    new_keypoints = Vector{SVector{2, Float64}}(undef, length(keypoints))
 
     algorithm = LucasKanade(nb_iterations; window_size, pyramid_levels)
     previous_pyramid = ImageTracking.LKPyramid(previous_image, pyramid_levels)
     current_pyramid = ImageTracking.LKPyramid(current_image, pyramid_levels)
+
+    fb_tracking!(
+        new_keypoints, previous_pyramid, current_pyramid, keypoints,
+        algorithm; max_distance,
+    )
+end
+
+"""
+Perform Forward-Backward tracking by first tracking keypoints from
+`previous_pyramid` to `current_pyramid` and then track resuling keypoints
+in reverse order.
+Then filter out those forward-backward keypoints that are too far away
+from the original keypoints to be consistent.
+
+# Arguments:
+
+- `new_keypoints`:
+    Vector where to write resulting new poisitions of keypoints.
+    Should be of the same size as `keypoints` vector.
+- `max_distance::Real`:
+    Maximum distance in pixels between Forward-Backward tracked keypoints
+    to be considered the same keypoint.
+"""
+function fb_tracking!(
+    new_keypoints::Vector{SVector{2, Float64}},
+    previous_pyramid::ImageTracking.LKPyramid,
+    current_pyramid::ImageTracking.LKPyramid,
+    keypoints::Vector{SVector{2, Float64}},
+    algorithm::LucasKanade;
+    max_distance::Real = 0.5,
+)
+    isempty(keypoints) && return
 
     # Forward tracking.
     flow = fill(SVector{2}(0.0, 0.0), length(keypoints))
@@ -24,18 +54,18 @@ function fb_tracking(
         previous_pyramid, current_pyramid, keypoints, flow, algorithm,
     )
 
-    valid_correspondences = SVector{2, Float64}[]
+    valid_correspondences = Vector{SVector{2, Float64}}(undef, sum(status))
     valid_ids = Dict{Int32, Int32}() # Mapping to the original points ids.
-    nb_good = 0
 
+    nb_good = 0
     for i in 1:length(status)
         status[i] || continue
 
         new_point = keypoints[i] .+ flow[i]
-        new_points[i] = new_point
-        push!(valid_correspondences, new_point)
+        new_keypoints[i] = new_point
 
         nb_good += 1
+        valid_correspondences[nb_good] = new_point
         valid_ids[nb_good] = i
     end
 
@@ -54,5 +84,5 @@ function fb_tracking(
             (status[idx] = false; continue)
     end
 
-    new_points, status
+    new_keypoints, status
 end
