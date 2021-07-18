@@ -24,11 +24,12 @@ mutable struct Frame
     id::Int64
     kfid::Int64
     time::Float64
-    # pose cam -> world
+    # world -> camera transformation.
     cw::SMatrix{4, 4, Float64}
-    # pose world -> cam
+    # camera -> world transformation.
     wc::SMatrix{4, 4, Float64}
-    # calibration model (camera)
+    # Calibration camera model.
+    camera::Camera
     """
     Map of observed keypoints.
     """
@@ -125,4 +126,20 @@ end
 function set_cw!(f::Frame, cw::SMatrix{4, 4, Float32})
     f.cw = cw
     f.wc = inv(SE3, cw)
+end
+
+function project_camera_to_world(f::Frame, point)
+    f.wc * point
+end
+
+function project_world_to_camera(f::Frame, point)
+    f.cw * point
+end
+
+function project_world_to_image(f::Frame, point)
+    project(f.camera, project_world_to_camera(f, point))
+end
+
+function project_world_to_image_distort(f::Frame, point)
+    project_undistort(f.camera, project_world_to_camera(f, point))
 end

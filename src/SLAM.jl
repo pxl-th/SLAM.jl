@@ -45,6 +45,7 @@ function expand(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
     hcat(m, SVector{4, T}(0, 0, 0, 1))
 end
 
+include("camera.jl")
 include("extractor.jl")
 include("tracker.jl")
 
@@ -141,48 +142,41 @@ end
 function test_tracking_simple()
     ex = Extractor(1000, BRIEF())
 
-    frame1 = load("frame-1.jpg") .|> Gray
-    frame2 = load("frame-2.jpg") .|> Gray
-
-    # frame1 = load("t1.png") .|> Gray
-    # frame2 = load("t3.png") .|> Gray
-
-    # demo = joinpath(dirname(pathof(ImageTracking)), "..", "demo")
-    # frame1 = load(joinpath(demo, "table1.jpg")) .|> Gray
-    # frame2 = load(joinpath(demo, "table2.jpg")) .|> Gray
-
+    frame1 = load("frame-1.jpg") .|> Gray{Float64}
+    frame2 = load("frame-2.jpg") .|> Gray{Float64}
     @show size(frame1)
 
     raw_keypoints1 = [
         SVector{2, Float64}(k[1], k[2])
         for k in detect(ex, frame1, [])
     ]
-    new_keypoints, status = fb_tracking(
-        frame1, frame2, raw_keypoints1;
-        nb_iterations=30, window_size=21, pyramid_levels=3,
-    )
-    new_keypoints = new_keypoints[status]
-
-    @info "Full track:"
-    @btime fb_tracking(
-        $frame1, $frame2, $raw_keypoints1;
-        nb_iterations=30, window_size=21, pyramid_levels=3,
-    )
-
-    # first_pyramid = ImageTracking.LKPyramid(frame1, 3)
-    # second_pyramid = ImageTracking.LKPyramid(frame2, 3; compute_gradients=false)
-    # displacement = fill(SVector{2, Float64}(0.0, 0.0), length(raw_keypoints1))
-    # algorithm = LucasKanade(30; window_size=21, pyramid_levels=3)
-
-    # @info "In-place:"
-    # @btime ImageTracking.optflow!(
-    #     $first_pyramid, $second_pyramid,
-    #     $raw_keypoints1, $displacement,
-    #     $algorithm,
+    # new_keypoints, status = fb_tracking(
+    #     frame1, frame2, raw_keypoints1;
+    #     nb_iterations=30, window_size=21, pyramid_levels=3,
     # )
+    # new_keypoints = new_keypoints[status]
 
+    pyramid1 = ImageTracking.LKPyramid(frame1, 3)
+    pyramid2 = ImageTracking.LKPyramid(frame2, 3; compute_gradients=false)
+    algo = LucasKanade(30; window_size=21, pyramid_levels=3)
+
+    displacement = fill(SVector{2, Float64}(0.0, 0.0), length(raw_keypoints1))
+    displacement, status = ImageTracking.optflow!(
+        pyramid1, pyramid2, raw_keypoints1, displacement, algo,
+    )
+    new_keypoints = [
+        rk + d
+        for (rk, d, s) in zip(raw_keypoints1, displacement, status)
+        if s
+    ]
     @info length(raw_keypoints1)
     @info length(new_keypoints)
+
+    displacement = fill(SVector{2, Float64}(0.0, 0.0), length(raw_keypoints1))
+    @btime ImageTracking.optflow!(
+        $pyramid1, $pyramid2, $raw_keypoints1,
+        $displacement, $algo,
+    )
 
     frame1 = frame1 .|> RGB
     for kp in raw_keypoints1
