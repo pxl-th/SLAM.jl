@@ -113,7 +113,10 @@ function run!(sm::SlamManager, image, time)
 end
 
 function main()
-    params = Params(1000, 50, true, false)
+    params = Params(
+        1000, 50, 0.5,
+        3, 11, true, false,
+    )
     camera = Camera(
         910, 910, 582, 437,
         0, 0, 0, 0,

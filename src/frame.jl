@@ -1,4 +1,4 @@
-struct Keypoint
+mutable struct Keypoint
     id::Int64
     """
     Coordinates of a keypoint in (Y, X) format.
@@ -104,6 +104,32 @@ function add_keypoint!(f::Frame, keypoint::Keypoint)
     end
 end
 
+function update_keypoint!(f::Frame, id::Int64, point)
+    ckp = get(f.keypoints, id, Keypoint(Val{:invalid}))
+    is_valid(ckp) || return
+
+    kp = ckp |> deepcopy
+    kp.point = point
+    # TODO undistort
+    kp.undistorted_point = point
+    kp.position = normalize(f.camera.iK * Point3f(point[2], point[1], 1.0))
+
+    update_keypoint_in_grid!(f, ckp, kp)
+    f.keypoints[id] = kp
+end
+
+function update_keypoint_in_grid!(
+    f::Frame, previous_keypoint::Keypoint, new_keypoint::Keypoint,
+)
+    prev_kpi = to_cartesian(previous_keypoint.pixel, f.cell_size)
+    new_kpi = to_cartesian(new_keypoint.pixel, f.cell_size)
+    prev_kpi == new_kpi && return
+    # Update grid, when new keypoint changes its position
+    # so much as to move to the other grid cell.
+    remove_keypoint_from_grid!(f, previous_keypoint)
+    add_keypoint_to_grid!(f, new_keypoint)
+end
+
 function add_keypoint_to_grid!(f::Frame, keypoint::Keypoint)
     kpi = to_cartesian(keypoint.pixel, f.cell_size)
     isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells += 1)
@@ -113,7 +139,7 @@ end
 function remove_keypoint!(f::Frame, id::Int64)
     # TODO is invalid keypoint constructed in any case?
     kp = get(f.keypoints, id, Keypoint(Val{:invalid}))
-    !is_valid(kp) && return
+    is_valid(kp) || return
 
     remove_keypoint_from_grid!(f, kp)
 

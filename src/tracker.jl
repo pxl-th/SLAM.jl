@@ -1,9 +1,15 @@
 """
 Perform Forward-Backward Lucas-Kanade optical flow tracking.
 
-Params:
-    keypoints::Vector{Point2f}
-        Vector of 2d keypoints in `(row, col)` format which to track.
+# Arguments:
+
+- `keypoints::Vector{Point2f}`:
+    Vector of 2d keypoints in `(row, col)` format which to track.
+
+# Returns:
+
+    `Tuple{Vector{SVector{2, Float64}}, Vector{Bool}}`.
+    New keypoints and their status.
 """
 function fb_tracking(
     previous_image, current_image, keypoints;
