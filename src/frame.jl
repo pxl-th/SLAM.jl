@@ -5,6 +5,10 @@ struct Keypoint
     """
     pixel::Point2f
     undistorted_pixel::Point2f
+    """
+    Position of a keypoint in 3D space in `(x, y, z)` format. Normalized.
+    """
+    position::Point3f
 
     descriptor::BitVector
     # is_retracked::Bool
@@ -45,8 +49,7 @@ mutable struct Frame
 end
 
 function Frame(;
-    image_resolution::Tuple{Int64, Int64}, # height, width format.
-    cell_size::Int64,
+    camera::Camera, cell_size::Int64,
     id::Int64 = 0, kfid::Int64 = 0, time::Float64 = 0.0,
     cw::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
     wc::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
@@ -55,28 +58,40 @@ function Frame(;
     nb_occupied_cells = 0
     keypoints = Dict{Int64, Keypoint}()
 
+    image_resolution = (camera.height, camera.width)
     cells = image_resolution .÷ cell_size
-    @debug "Frame grid resolution $cells"
+    @debug "[Frame] Grid resolution: $cells"
     grid = [Set{Int64}() for _=1:cells[1], _=1:cells[2]]
 
     Frame(
         id, kfid, time, cw, wc,
+        camera,
         keypoints, grid,
         nb_occupied_cells, cell_size,
         nb_keypoints, 0, 0,
     )
 end
 
+get_keypoints(f::Frame) = f.keypoints |> values
+
 function add_keypoint!(
-    f::Frame, kid::Int64,
-    keypoint::ImageFeatures.Keypoint, descriptor::BitVector,
+    f::Frame, point::Point2f, id::Int64;
+    descriptor::BitVector = BitVector(), is_3d::Bool = false,
 )
-    # TODO undistort keypoint using calibration model
-    add_keypoint!(f, Keypoint(kid, keypoint, descriptor))
+    # TODO undistort `point` using calibration model
+    undistorted_point = point
+    # Compute normalized 3d position of a point in (x, y, z) format.
+    # Note that `point` is in `(y, x)` format.
+    position = normalize(f.camera.iK * Point3f(point[2], point[1], 1.0))
+    kp = Keypoint(id, point, undistorted_point, position, descriptor, is_3d)
+    add_keypoint!(f, kp)
 end
 
 function add_keypoint!(f::Frame, keypoint::Keypoint)
-    keypoint.id in keys(f.keypoints) && return
+    if keypoint.id in keys(f.keypoints)
+        @warn "[Frame] $(f.id) already has keypoint $(keypoint.id). Skipping."
+        return
+    end
 
     f.keypoints[keypoint.id] = keypoint
     add_keypoint_to_grid!(f, keypoint)
@@ -118,12 +133,12 @@ function remove_keypoint_from_grid!(f::Frame, keypoint::Keypoint)
     end
 end
 
-function set_wc!(f::Frame, wc::SMatrix{4, 4, Float32})
+function set_wc!(f::Frame, wc::SMatrix{4, 4, Float64})
     f.wc = wc
     f.cw = inv(SE3, wc)
 end
 
-function set_cw!(f::Frame, cw::SMatrix{4, 4, Float32})
+function set_cw!(f::Frame, cw::SMatrix{4, 4, Float64})
     f.cw = cw
     f.wc = inv(SE3, cw)
 end

@@ -1,7 +1,6 @@
 module SLAM
 
 using LinearAlgebra
-
 using StaticArrays
 using GeometryBasics
 using Images
@@ -10,11 +9,11 @@ using ImageTracking
 using VideoIO
 using Rotations
 using Manifolds
-using BenchmarkTools
 
 """
 2D Point in (x, y) format.
 """
+const Point3f = Point3{Float64}
 const Point2i = Point2{Int64}
 const Point2f = Point2{Float64}
 
@@ -36,7 +35,7 @@ Params:
 end
 
 @inline function to_cartesian(x::Point2, cell_size::Int64)
-    x = convert(x) .÷ cell_size
+    x = convert(x) .÷ cell_size .+ 1
     CartesianIndex(x[1], x[2])
 end
 
@@ -70,29 +69,42 @@ include("motion_model.jl")
 include("map_manager.jl")
 include("front_end.jl")
 
-struct SlamManager
+mutable struct SlamManager
     image_queue::Vector{Matrix{Gray}}
     current_frame::Frame
     frame_id::Int64
 
     front_end::FrontEnd
-    # map manager
-    # mapper
-    # feature extractor
-    # feature tracker
-    # exit required
+    map_manager::MapManager
+    extractor::Extractor
+
+    camera::Camera
+    exit_required::Bool
 end
 
-function SlamManager()
-    frame = Frame()
-    front_end = FrontEnd(frame)
-    SlamManager([], frame, frame.id, front_end)
+function SlamManager(
+    params::Params, camera::Camera,
+)
+    frame = Frame(;camera=camera, cell_size=params.max_distance)
+    extractor = Extractor(params.max_nb_keypoints, BRIEF())
+    map_manager = MapManager(params, frame, extractor)
+    front_end = FrontEnd(params, frame, map_manager)
+
+    SlamManager(
+        [], frame, frame.id,
+        front_end, map_manager, extractor,
+        camera, false,
+    )
 end
 
-function run(sm::SlamManager, image, time)
+function run!(sm::SlamManager, image, time)
+    sm.exit_required && return
+
     sm.frame_id += 1
     sm.current_frame.id = sm.frame_id
     sm.current_frame.time = time
+    @debug "[Slam Manager] Frame $(sm.frame_id) @ $time"
+
     # Send image to front end.
     is_kf_required = track(sm.front_end, image, time)
     # check for reset
@@ -100,42 +112,24 @@ function run(sm::SlamManager, image, time)
     # send new kf to mapper to add to its queue
 end
 
-"""
-Immediate TODO:
-+ image preprocessing
-+ map manager: create kf (prepare, extract, add)
-+ motion model
-+ Keypoint struct
-+ feature extractor
-+ slam state (params)
-
-- feature tracker
-- compute pose 2d-3d
-
-- camera calibration
-"""
-
 function main()
+    params = Params(1000, 50, true, false)
+    camera = Camera(
+        910, 910, 582, 437,
+        0, 0, 0, 0,
+        874, 1164,
+    )
+    ex = Extractor(1000, BRIEF())
+    slam_manager = SlamManager(params, camera)
+
     reader = VideoIO.openvideo("./data/5.hevc")
-
-    ex = Extractor(2000, BRIEF())
-
     for (i, frame) in enumerate(reader)
-        # frame = frame .|> Gray
+        frame = frame .|> Gray{Float64}
 
-        # kps = detect(ex, frame, [])
-        # descriptors, kps = describe(ex, frame, kps)
+        run!(slam_manager, frame, i)
 
-        # frame = frame .|> RGB
-        # for (kp, dp) in zip(kps, descriptors)
-        #     frame[kp] = RGB(1, 0, 0)
-        #     Keypoint(1, kp, dp)
-        # end
-
-        save("frame-$i.jpg", frame)
-        i == 2 && break
+        break
     end
-
     reader |> close
 end
 
@@ -173,10 +167,10 @@ function test_tracking_simple()
     @info length(new_keypoints)
 
     displacement = fill(SVector{2, Float64}(0.0, 0.0), length(raw_keypoints1))
-    @btime ImageTracking.optflow!(
-        $pyramid1, $pyramid2, $raw_keypoints1,
-        $displacement, $algo,
-    )
+    # @btime ImageTracking.optflow!(
+    #     $pyramid1, $pyramid2, $raw_keypoints1,
+    #     $displacement, $algo,
+    # )
 
     frame1 = frame1 .|> RGB
     for kp in raw_keypoints1
@@ -219,8 +213,8 @@ function test_motion()
     update!(model, x, 2)
 end
 
-# main()
+main()
 # test_motion()
-test_tracking_simple()
+# test_tracking_simple()
 
 end

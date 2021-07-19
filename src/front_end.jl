@@ -1,7 +1,6 @@
 mutable struct FrontEnd
     current_frame::Frame
     motion_model::MotionModel
-    # feature tracker
     map_manager::MapManager
     params::Params
 
@@ -9,13 +8,14 @@ mutable struct FrontEnd
     previous_image::Matrix{Gray}
 end
 
-FrontEnd(frame::Frame, params::Params, map_manager::MapManager) = FrontEnd(
+FrontEnd(params::Params, frame::Frame, map_manager::MapManager) = FrontEnd(
     frame, MotionModel(), map_manager, params,
     Matrix{Gray}(undef, 0, 0), Matrix{Gray}(undef, 0, 0),
 )
 
 function track(fe::FrontEnd, image, time)
     is_kf_required = track_mono(fe, image, time)
+    @debug "[Front-End] Is KF required $is_kf_required @ $time"
     if is_kf_required
         create_keyframe!(fe.map_manager, image)
         # TODO build optial flow pyramid and reuse it in optical flow
@@ -25,6 +25,7 @@ end
 function track_mono(fe::FrontEnd, image, time)::Bool
     preprocess(fe, image)
     # If it's the first frame, then KeyFrame is always needed.
+    @debug "[Front End] Current Frame id $(fe.current_frame.id)"
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
     set_wc!(fe.current_frame, fe.motion_model(fe.current_frame.wc, time))
@@ -32,7 +33,7 @@ function track_mono(fe::FrontEnd, image, time)::Bool
     # epipolar filtering
     # compute pose 2d-3d
     # update motion model
-    # check if new kf required
+    false # TODO check if new kf required
 end
 
 """
@@ -82,7 +83,7 @@ function ktl_tracking(fe::FrontEnd)
         push!(prior_3d_pixels, kp.pixel)
         push!(prior_3d_ids, kp.id)
     end
-
+    @debug "[Front-End] N 3D Priors: $(length(priors_3d))"
     @debug "[Front-End] N Priors: $(length(priors))"
 
     # First, track 3d keypoints, if using prior.

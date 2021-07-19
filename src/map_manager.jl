@@ -1,4 +1,4 @@
-struct MapPoint
+mutable struct MapPoint
     id::Int64
     """
     Anchored position: kfid + position + inv_depth.
@@ -53,11 +53,9 @@ end
 @inline add_keyframe_observation!(m::MapPoint, id::Int64) =
     push!(m.observer_keyframes_ids, id)
 
-struct MapManager
+mutable struct MapManager
     current_frame::Frame
     frames_map::Dict{Int64, Frame}
-
-    nb_keyframes::Int64
 
     params::Params
     extractor::Extractor
@@ -66,8 +64,14 @@ struct MapManager
     map_points::Dict{Int64, MapPoint}
     current_mappoint_id::Int64
     current_keyframe_id::Int64
+    nb_keyframes::Int64
     nb_mappoints::Int64
 end
+
+MapManager(params::Params, frame::Frame, extractor::Extractor) = MapManager(
+    frame, Dict{Int64, Frame}(), params, extractor,
+    Dict{Int64, MapPoint}(), 0, 0, 0, 0,
+)
 
 function create_keyframe!(m::MapManager, image)
     prepare_frame!(m)
@@ -100,7 +104,6 @@ function extract_keypoints!(m::MapManager, image)
     current_points = [kp.pixel for kp in keypoints]
 
     # describe keypoints if using brief
-
     nb_2_detect = m.params.max_nb_keypoints - m.current_frame.nb_occupied_cells
     nb_2_detect ≤ 0 && return
     # Detect keypoints in the provided `image` using current keypoints
@@ -115,14 +118,17 @@ end
 function add_keypoints_to_frame!(
     m::MapManager, frame::Frame, keypoints, descriptors,
 )
+    @debug "[Map Manager] N Keypoints $(length(keypoints))"
     for (kp, dp) in zip(keypoints, descriptors)
         # m.current_mappoint_id is incremented in `add_mappoint!`.
-        add_keypoint!(frame, m.current_mappoint_id)
+        pixel = Point2f(kp[1], kp[2])
+        add_keypoint!(frame, pixel, m.current_mappoint_id)
         add_mappoint!(m, dp)
     end
 end
 
 function add_mappoint!(m::MapManager, descriptor)
+    # TODO add color to map point.
     new_mappoint = MapPoint(
         m.current_mappoint_id, m.current_keyframe_id, descriptor,
     )
@@ -136,7 +142,7 @@ Copy current MapManager's Frame and add it to the KeyFrame map.
 Increase current keyframe id & total number of keyframes.
 """
 function add_keyframe!(m::MapManager)
-    m.frames_map[m.current_keyframe_id, deepcopy(m.current_frame)]
+    m.frames_map[m.current_keyframe_id] = m.current_frame |> deepcopy
     m.current_keyframe_id += 1
     m.nb_keyframes += 1
 end
