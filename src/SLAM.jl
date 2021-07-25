@@ -214,7 +214,7 @@ function test_motion()
     update!(model, x, 2)
 end
 
-main()
+# main()
 # test_motion()
 # test_tracking_simple()
 

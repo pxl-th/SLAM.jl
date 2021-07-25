@@ -5,7 +5,6 @@ version = "0.1.0"
 
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
-GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 ImageFeatures = "92ff4b2b-8094-53d3-b29d-97f740f06cef"
 ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
 ImageMagick = "6218d12a-5da1-5696-b52f-db25d2ecc6d1"
