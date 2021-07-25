@@ -106,15 +106,21 @@ function run!(sm::SlamManager, image, time)
 
     # Send image to front end.
     is_kf_required = track(sm.front_end, image, time)
-    # check for reset
-    # create new kf if needed (which is a copy from frontend)
-    # send new kf to mapper to add to its queue
+    # TODO check for reset `params.reset_required`
+    # TODO create new kf if needed (which is a copy from frontend)
+    # TODO send new kf to mapper to add to its queue
+end
+
+function draw_keypoints!(image, frame::Frame)
+    for kp in values(frame.keypoints)
+        image[kp.pixel |> to_cartesian] = RGB(1, 0, 0)
+    end
 end
 
 function main()
     params = Params(
         1000, 50, 0.5,
-        3, 11, false, false,
+        3, 21, true, false, false, false,
     )
     camera = Camera(
         910, 910, 582, 437,
@@ -129,93 +135,10 @@ function main()
 
         run!(slam_manager, frame, i)
 
-        i == 2 && break
+        i == 5 && break
     end
     reader |> close
 end
-
-function test_tracking_simple()
-    ex = Extractor(1000, BRIEF())
-
-    frame1 = load("frame-1.jpg") .|> Gray{Float64}
-    frame2 = load("frame-2.jpg") .|> Gray{Float64}
-    @show size(frame1)
-
-    raw_keypoints1 = [
-        SVector{2, Float64}(k[1], k[2])
-        for k in detect(ex, frame1, [])
-    ]
-    # new_keypoints, status = fb_tracking(
-    #     frame1, frame2, raw_keypoints1;
-    #     nb_iterations=30, window_size=21, pyramid_levels=3,
-    # )
-    # new_keypoints = new_keypoints[status]
-
-    pyramid1 = ImageTracking.LKPyramid(frame1, 3)
-    pyramid2 = ImageTracking.LKPyramid(frame2, 3; compute_gradients=false)
-    algo = LucasKanade(30; window_size=21, pyramid_levels=3)
-
-    displacement = fill(SVector{2, Float64}(0.0, 0.0), length(raw_keypoints1))
-    displacement, status = ImageTracking.optflow!(
-        pyramid1, pyramid2, raw_keypoints1, displacement, algo,
-    )
-    new_keypoints = [
-        rk + d
-        for (rk, d, s) in zip(raw_keypoints1, displacement, status)
-        if s
-    ]
-    @info length(raw_keypoints1)
-    @info length(new_keypoints)
-
-    displacement = fill(SVector{2, Float64}(0.0, 0.0), length(raw_keypoints1))
-    # @btime ImageTracking.optflow!(
-    #     $pyramid1, $pyramid2, $raw_keypoints1,
-    #     $displacement, $algo,
-    # )
-
-    frame1 = frame1 .|> RGB
-    for kp in raw_keypoints1
-        kp = kp |> to_cartesian
-        frame1[kp] = RGB(0, 1, 0)
-    end
-    for nkp in new_keypoints
-        nkp = nkp |> to_cartesian
-        frame1[nkp] = RGB(0, 0, 1)
-    end
-
-    frame2 = frame2 .|> RGB
-    for kp in raw_keypoints1
-        kp = kp |> to_cartesian
-        frame2[kp] = RGB(0, 1, 0)
-    end
-    for nkp in new_keypoints
-        nkp = nkp |> to_cartesian
-        frame2[nkp] = RGB(0, 0, 1)
-    end
-
-    save("jl-t1.jpg", frame1)
-    save("jl-t2.jpg", frame2)
-end
-
-function test_motion()
-    model = MotionModel()
-
-    x = RotX(0.025) |> expand
-    @show x
-    update!(model, x, 1)
-
-    x = RotX(0.05) |> expand
-    @show x
-    x = model(x, 2)
-    @show x
-
-    x = RotX(0.075) |> expand
-    @show x
-    update!(model, x, 2)
-end
-
-# main()
-# test_motion()
-# test_tracking_simple()
+main()
 
 end

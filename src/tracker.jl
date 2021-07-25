@@ -15,8 +15,8 @@ function fb_tracking(
     previous_image, current_image, keypoints;
     nb_iterations::Int = 30, window_size::Int = 11, pyramid_levels::Int = 3,
     max_distance::Real = 0.5,
-)
-    new_keypoints = Vector{SVector{2, Float64}}(undef, length(keypoints))
+)::Tuple{Vector{Point2f}, BitVector}
+    new_keypoints = Vector{Point2f}(undef, length(keypoints))
 
     algorithm = LucasKanade(nb_iterations; window_size, pyramid_levels)
     previous_pyramid = ImageTracking.LKPyramid(previous_image, pyramid_levels)

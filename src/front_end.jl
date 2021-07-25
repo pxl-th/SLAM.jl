@@ -20,6 +20,10 @@ function track(fe::FrontEnd, image, time)
         create_keyframe!(fe.map_manager, image)
         # TODO build optial flow pyramid and reuse it in optical flow
     end
+
+    ni = image |> copy .|> RGB
+    draw_keypoints!(ni, fe.current_frame)
+    save("/home/pxl-th/projects/frame-$time.png", ni)
 end
 
 function track_mono(fe::FrontEnd, image, time)::Bool
@@ -34,9 +38,34 @@ function track_mono(fe::FrontEnd, image, time)::Bool
     # track new image
     fe |> ktl_tracking!
     # epipolar filtering
+    if !fe.params.vision_initialized
+        if fe.current_frame.nb_keypoints < 50
+            fe.params.reset_required = true
+            return false
+        elseif check_ready_for_init(fe)
+            @debug "[Front End] System ready for initialization."
+            fe.params.vision_initialized = true
+            return true
+        else
+            @debug "[Front End] System not ready for initialization."
+            return false
+        end
+    end
     # compute pose 2d-3d
     # update motion model
     false # TODO check if new kf required
+end
+
+"""
+Check if there is enough average rotation compensated parallax
+between current Frame and previous KeyFrame.
+
+Additionally, compute Essential matrix using 5-point Ransac algorithm
+to filter out outliers and check if there is enough inliers to proceed.
+"""
+function check_ready_for_init(fe::FrontEnd)
+    # TODO
+    false
 end
 
 """
@@ -65,8 +94,9 @@ function ktl_tracking!(fe::FrontEnd)
     prior_3d_ids = Int64[]
     prior_3d_pixels = Point2f[]
 
+    # Select points to track.
     for (_, kp) in fe.current_frame.keypoints
-        if !fe.params.use_prior
+        if !fe.params.use_prior || !kp.is_3d
             # Init prior with previous pixel positions.
             push!(priors, kp.pixel)
             push!(prior_pixels, kp.pixel)
@@ -75,7 +105,6 @@ function ktl_tracking!(fe::FrontEnd)
         end
 
         # If using prior, init pixel positions using motion model.
-        kp.is_3d || continue
         # Projection in `(y, x)` format.
         projection = project_world_to_image_distort(
             fe.current_frame, fe.map_manager.map_points[kp.id].position,
@@ -131,6 +160,7 @@ function ktl_tracking!(fe::FrontEnd)
         window_size=fe.params.window_size,
         max_distance=fe.params.max_ktl_distance,
     )
+    # Either update or remove current keypoints.
     nb_good = 0
     for i in 1:length(new_keypoints)
         if status[i]

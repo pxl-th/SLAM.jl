@@ -29,4 +29,14 @@ struct Params
     """
     do_undistort::Bool
     # intrinsics & extrinsics for stereo
+    """
+    Boolean that indicated if the vision (front-end) tracking was
+    successfully initialized. Initially it is `false`.
+    """
+    vision_initialized::Bool
+    """
+    Indicates if the visual part requires reset.
+    This could happen if the system is tracking too little points.
+    """
+    reset_required::Bool
 end

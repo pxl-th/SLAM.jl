@@ -145,10 +145,11 @@ function add_keypoint_to_grid!(f::Frame, keypoint::Keypoint)
 end
 
 function remove_keypoint!(f::Frame, id::Int64)
-    # TODO is invalid keypoint constructed in any case?
+    # TODO invalid keypoint constructed in any case.
     kp = get(f.keypoints, id, Keypoint(Val(:invalid)))
     is_valid(kp) || return
 
+    pop!(f.keypoints, id)
     remove_keypoint_from_grid!(f, kp)
 
     f.nb_keypoints -= 1
