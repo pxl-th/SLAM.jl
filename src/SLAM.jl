@@ -2,7 +2,6 @@ module SLAM
 
 using LinearAlgebra
 using StaticArrays
-using GeometryBasics
 using Images
 using ImageFeatures
 using ImageTracking
@@ -10,17 +9,17 @@ using VideoIO
 using Rotations
 using Manifolds
 
-"""
-2D Point in (x, y) format.
-"""
-const Point3f = Point3{Float64}
-const Point2i = Point2{Int64}
-const Point2f = Point2{Float64}
+const Point2 = SVector{2}
+const Point2i = SVector{2, Int64}
+const Point2f = SVector{2, Float64}
+
+const Point3f = SVector{3, Float64}
+const Point3f0 = SVector{3, Float32}
 
 const SE3 = SpecialEuclidean(3)
 
-@inline convert(x::SVector{2, Float64})::Point2i = x .|> round .|> Int64
-@inline convert(x::Point2)::Point2i = x .|> round .|> Int64
+@inline convert(x::Point2f)::Point2i = x .|> round .|> Int64
+# @inline convert(x::Point2)::Point2i = x .|> round .|> Int64
 @inline convert(x::Vector{Point2f}) =
     Point2i[xi .|> round .|> Int64 for xi in x]
 
@@ -115,14 +114,13 @@ end
 function main()
     params = Params(
         1000, 50, 0.5,
-        3, 11, true, false,
+        3, 11, false, false,
     )
     camera = Camera(
         910, 910, 582, 437,
         0, 0, 0, 0,
         874, 1164,
     )
-    ex = Extractor(1000, BRIEF())
     slam_manager = SlamManager(params, camera)
 
     reader = VideoIO.openvideo("./data/5.hevc")
@@ -131,7 +129,7 @@ function main()
 
         run!(slam_manager, frame, i)
 
-        break
+        i == 2 && break
     end
     reader |> close
 end

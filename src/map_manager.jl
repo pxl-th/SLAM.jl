@@ -36,14 +36,14 @@ MapPoint(::Val{:invalid}) = MapPoint(
 function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
     observed_keyframes_ids = Set{Int64}(kfid)
     keyframes_descriptors = Dict{Int64, BitVector}(kfid => descriptor)
-    position = Point3f0(0f0)
+    position = Point3f0(0f0, 0f0, 0f0)
     inv_depth = 0f0
     is_3d = false
 
     MapPoint(
         id, kfid, observed_keyframes_ids,
         descriptor, keyframes_descriptors,
-        Point3f0(0f0), 0f0,
+        Point3f0(0f0, 0f0, 0f0), 0f0,
         is_3d, is_observed,
     )
 end
@@ -74,6 +74,7 @@ MapManager(params::Params, frame::Frame, extractor::Extractor) = MapManager(
 )
 
 function create_keyframe!(m::MapManager, image)
+    @debug "[Map Manager] Creating new keyframe."
     prepare_frame!(m)
     extract_keypoints!(m, image)
     add_keyframe!(m)
@@ -112,6 +113,7 @@ function extract_keypoints!(m::MapManager, image)
     isempty(keypoints) && return
 
     descriptors, keypoints = describe(m.extractor, image, keypoints)
+    @debug "[Map Manager] Extracted $(length(keypoints)) keypoints."
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
 end
 

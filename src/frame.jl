@@ -1,7 +1,10 @@
 mutable struct Keypoint
+    """
+    Unique Keypoint id.
+    """
     id::Int64
     """
-    Coordinates of a keypoint in (Y, X) format.
+    Coordinates of a keypoint in `(y, x)` format.
     """
     pixel::Point2f
     undistorted_pixel::Point2f
@@ -15,7 +18,12 @@ mutable struct Keypoint
     is_3d::Bool
 end
 
-Keypoint(::Val{:invalid}) = Keypoint(-1, Point2f(), BitVector(), false)
+function Keypoint(::Val{:invalid})
+    Keypoint(
+        -1, Point2f(0, 0), Point2f(0, 0), Point3f(0, 0, 0),
+        BitVector(), false,
+    )
+end
 
 function Keypoint(id, kp::ImageFeatures.Keypoint, descriptor::BitVector)
     kp = Point2f(kp[1], kp[2])
@@ -105,13 +113,13 @@ function add_keypoint!(f::Frame, keypoint::Keypoint)
 end
 
 function update_keypoint!(f::Frame, id::Int64, point)
-    ckp = get(f.keypoints, id, Keypoint(Val{:invalid}))
+    ckp = get(f.keypoints, id, Keypoint(Val(:invalid)))
     is_valid(ckp) || return
 
     kp = ckp |> deepcopy
-    kp.point = point
+    kp.pixel = point
     # TODO undistort
-    kp.undistorted_point = point
+    kp.undistorted_pixel = point
     kp.position = normalize(f.camera.iK * Point3f(point[2], point[1], 1.0))
 
     update_keypoint_in_grid!(f, ckp, kp)
@@ -138,7 +146,7 @@ end
 
 function remove_keypoint!(f::Frame, id::Int64)
     # TODO is invalid keypoint constructed in any case?
-    kp = get(f.keypoints, id, Keypoint(Val{:invalid}))
+    kp = get(f.keypoints, id, Keypoint(Val(:invalid)))
     is_valid(kp) || return
 
     remove_keypoint_from_grid!(f, kp)

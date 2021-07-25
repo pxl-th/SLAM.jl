@@ -28,7 +28,9 @@ function track_mono(fe::FrontEnd, image, time)::Bool
     @debug "[Front End] Current Frame id $(fe.current_frame.id)"
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
-    set_wc!(fe.current_frame, fe.motion_model(fe.current_frame.wc, time))
+    new_wc = fe.motion_model(fe.current_frame.wc, time)
+    @debug "[Front End] New wc $new_wc"
+    set_wc!(fe.current_frame, new_wc)
     # track new image
     fe |> ktl_tracking!
     # epipolar filtering
@@ -112,7 +114,7 @@ function ktl_tracking!(fe::FrontEnd)
             end
         end
         @debug "[Front End] Prior 3D tracking: $nb_good / $(length(priors_3d))."
-        # If motion model is quite wrong, require P3P next,
+        # If motion model is wrong, require P3P next,
         # without using any priors.
         if nb_good < 0.33 * length(priors_3d)
             fe.p3p_required = true

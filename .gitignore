@@ -3,3 +3,4 @@ data/
 Manifest.toml
 *.jpg
 *.png
+*.so
