@@ -29,7 +29,7 @@ end
 function track_mono(fe::FrontEnd, image, time)::Bool
     preprocess!(fe, image)
     # If it's the first frame, then KeyFrame is always needed.
-    @debug "[Front End] Current Frame id $(fe.current_frame.id)"
+    @debug "[Front End] Current Frame id $(fe.current_frame.id), kfid $(fe.current_frame.kfid)"
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
     new_wc = fe.motion_model(fe.current_frame.wc, time)
@@ -64,8 +64,92 @@ Additionally, compute Essential matrix using 5-point Ransac algorithm
 to filter out outliers and check if there is enough inliers to proceed.
 """
 function check_ready_for_init(fe::FrontEnd)
+    # Get previous keyframe.
+    fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
+
+    avg_parallax = compute_parallax(
+        fe, fe.current_frame.kfid; compensate_rotation=false,
+    )
+    @debug "[Front-End] Init Avg Parallax: $avg_parallax"
+    avg_parallax ≤ fe.params.initial_parallax && return false
+
+    previous_keyframe = fe.map_manager.frames_map[fe.current_frame.kfid]
+    # Ensure there are enough keypoints for the essential matrix computation.
+    if fe.current_frame.nb_keypoints < 8
+        @debug "[Front-End] Not enough keypoints for initialization: " *
+            "$(fe.current_frame.nb_keypoints)"
+        return false
+    end
+
+    # Setup Essential matrix computation.
     # TODO
     false
+end
+
+"""
+Compute parallax in pixels between current Frame
+and the provided `current_frame_id` Frame.
+
+# Arguments:
+
+- `compensate_rotation::Bool`:
+    Compensate rotation by computing relative rotation between
+    current Frame and previous Keyframe if `true`. Default is `true`.
+- `only_2d::Bool`: Consider only 2d keypoints. Default is `true`.
+- `median_parallax::Bool`:
+    Instead of the average, compute median parallax. Default is `true`.
+"""
+function compute_parallax(
+    fe::FrontEnd, current_frame_id::Int;
+    compensate_rotation::Bool = true,
+    only_2d::Bool = true, median_parallax::Bool = true,
+)
+    if !(current_frame_id in keys(fe.map_manager.frames_map))
+        @debug "[Front-End] Error in `compute_parallax`! " *
+            "Keyframe $current_frame_id does not exist."
+        return 0.0
+    end
+
+    frame = fe.map_manager.frames_map[current_frame_id]
+
+    current_rotation = SMatrix{3, 3, Float64}(I)
+    compensate_rotation &&
+        (current_rotation = frame.getRcw() * fe.current_frame.getRwc();)
+
+    # Compute parallax.
+    avg_parallax = 0.0
+    n_parallax = 0
+    parallax_set = Set{Float64}()
+
+    # Compute parallax for all keypoints in previous KeyFrame.
+    for keypoint in values(fe.current_frame.keypoints)
+        only_2d && keypoint.is_3d && continue
+        keypoint.id in keys(frame.keypoints) || continue
+
+        # Compute parallax with undistorted pixel position.
+        undistorted_pixel = keypoint.undistorted_pixel
+        if compensate_rotation
+            undistorted_pixel = project(
+                frame.camera, current_rotation * keypoint.position,
+            )
+        end
+
+        frame_keypoint = frame.keypoints[keypoint.id]
+        parallax = norm(undistorted_pixel - frame_keypoint.undistorted_pixel)
+        avg_parallax += parallax
+        n_parallax += 1
+
+        median_parallax && push!(parallax_set, parallax)
+    end
+
+    n_parallax == 0 && return 0.0
+
+    if median_parallax
+        avg_parallax = parallax_set |> median
+    else
+        avg_parallax /= n_parallax
+    end
+    avg_parallax
 end
 
 """

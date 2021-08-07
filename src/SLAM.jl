@@ -8,6 +8,7 @@ using ImageTracking
 using VideoIO
 using Rotations
 using Manifolds
+using Parameters: @with_kw
 
 const Point2 = SVector{2}
 const Point2i = SVector{2, Int64}
@@ -118,10 +119,7 @@ function draw_keypoints!(image, frame::Frame)
 end
 
 function main()
-    params = Params(
-        1000, 50, 0.5,
-        3, 21, true, false, false, false,
-    )
+    params = Params()
     camera = Camera(
         910, 910, 582, 437,
         0, 0, 0, 0,
@@ -135,10 +133,10 @@ function main()
 
         run!(slam_manager, frame, i)
 
-        i == 5 && break
+        i == 2 && break
     end
     reader |> close
 end
-# main()
+main()
 
 end

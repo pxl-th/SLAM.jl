@@ -34,7 +34,11 @@ end
 
 mutable struct Frame
     id::Int64
+    """
+    KeyFrame id in the MapManager.
+    """
     kfid::Int64
+
     time::Float64
     # world -> camera transformation.
     cw::SMatrix{4, 4, Float64}
@@ -44,6 +48,7 @@ mutable struct Frame
     camera::Camera
     """
     Map of observed keypoints.
+    Keypoint id => Keypoint.
     """
     keypoints::Dict{Int64, Keypoint}
     keypoints_grid::Matrix{Set{Int64}}
@@ -177,6 +182,11 @@ function set_cw!(f::Frame, cw::SMatrix{4, 4, Float64})
     f.cw = cw
     f.wc = inv(SE3, cw)
 end
+
+get_Rwc(f::Frame) = f.wc[1:3, 1:3]
+get_Rcw(f::Frame) = f.cw[1:3, 1:3]
+get_twc(f::Frame) = f.wc[1:3, 4]
+get_tcw(f::Frame) = f.cw[1:3, 4]
 
 function project_camera_to_world(f::Frame, point)
     f.wc * point
