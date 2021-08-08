@@ -82,7 +82,76 @@ function check_ready_for_init(fe::FrontEnd)
     end
 
     # Setup Essential matrix computation.
-    # TODO
+    R_compensation = get_Rcw(previous_keyframe) * get_Rwc(fe.current_frame)
+    @debug "[Front-End] R_compensation:"
+    display(R_compensation); println()
+
+    n_parallax = 0
+    avg_parallax = 0.0
+
+    previous_points = Point2f[]
+    current_points = Point2f[]
+    kp_ids = Int[]
+
+    # Get all Keypoint positions and compute rotation-compensated parallax.
+    for keypoint in values(fe.current_frame.keypoints)
+        keypoint.id in keys(previous_keyframe.keypoints) || continue
+
+        pkf_keypoint = previous_keyframe.keypoints[keypoint.id]
+        push!(previous_points, pkf_keypoint.undistorted_pixel)
+        push!(current_points, keypoint.undistorted_pixel)
+        push!(kp_ids, keypoint.id)
+
+        # Compute rotation-compensated parallax.
+        rot_position = R_compensation * keypoint.position
+        rot_px = project(fe.current_frame.camera, rot_position)
+        avg_parallax += norm(rot_px - pkf_keypoint.undistorted_pixel)
+        n_parallax += 1
+    end
+
+    if n_parallax < 8
+        @debug "[Front-End] Not enough keypoints in previous KF " *
+            "to compute 5pt Essential Matrix."
+        return false
+    end
+
+    avg_parallax /= n_parallax
+    if (avg_parallax < fe.params.initial_parallax)
+        @debug "[Front-End] Not enough parallax ($avg_parallax) " *
+            "to compute 5pt Essential Matrix."
+        return false
+    end
+    @debug "[Front-End] 5pt parallax $avg_parallax @ $n_parallax points."
+
+    # Pass points in `(y, x)` format and camera intrinsics.
+    # TODO migrate to ransac 5pt when it is ready.
+    E, P, inliers, n_inliers = five_point(
+        previous_points, current_points,
+        fe.current_frame.camera.K,
+        fe.current_frame.camera.K,
+    )
+    if n_inliers < 5
+        @debug "[Front-End] Not enough inliers ($n_inliers) for the " *
+            "5pt Essential Matrix."
+        return false
+    end
+
+    @debug "[Front-End] 5pt N inliers $n_inliers."
+    @debug "[Front-End] 5pt N solutions $(length(P))"
+    display(E[1]); println()
+    display(P[1]); println()
+
+    # Remove outliers from the current frame.
+    for (i, inlier) in enumerate(inliers)
+        inlier && continue
+        remove_obs_from_current_frame!(fe.map_manager, kp_ids[i])
+    end
+    
+    # TODO arbitrary scale for translation.
+    # TODO inverse transformation.
+    # TODO set transformation to current frame
+    # TODO return true
+    # TODO move to 3x4 pose matrices
     false
 end
 
@@ -142,6 +211,7 @@ function compute_parallax(
         median_parallax && push!(parallax_set, parallax)
     end
 
+    @debug "[Front-End] Number parallax $n_parallax"
     n_parallax == 0 && return 0.0
 
     if median_parallax

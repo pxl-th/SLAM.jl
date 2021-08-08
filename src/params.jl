@@ -42,5 +42,5 @@
     """
     Amount of parallax (in pixels) needed for initialization system to kick in.
     """
-    initial_parallax::Real = 20.0
+    initial_parallax::Real = 10.0
 end

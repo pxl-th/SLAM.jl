@@ -9,6 +9,7 @@ using VideoIO
 using Rotations
 using Manifolds
 using Parameters: @with_kw
+using FivePoint
 
 const Point2 = SVector{2}
 const Point2i = SVector{2, Int64}
@@ -133,7 +134,7 @@ function main()
 
         run!(slam_manager, frame, i)
 
-        i == 2 && break
+        i == 3 && break
     end
     reader |> close
 end

@@ -40,11 +40,20 @@ function Camera(
     )
 end
 
+"""
+Project point from 3D space onto the image plane.
+
+# Arguments:
+- `point`: Point in 3D space in `(x, y, z)` format.
+
+# Returns:
+    Projected point in `(y, x)` format.
+"""
 function project(c::Camera, point)
     inv_z = 1.0 / point[3]
     Point2f(
-        c.fx * point[1] * inv_z + c.cx,
         c.fy * point[2] * inv_z + c.cy,
+        c.fx * point[1] * inv_z + c.cx,
     )
 end
 
@@ -73,7 +82,7 @@ function project_undistort(c::Camera, point)
     dty = c.p1 * (sqrd_radius + 2 * sqrd_normalized[2]) + 2 * c.p2 * p
     # Lens distortion coordinates.
     distorted = rd .* normalized .+ (dtx, dty)
-    # Final projection (we assume skew is always `0`).
+    # Final projection (assume skew is always `0`).
     distorted[2, 1] .* (c.fy, c.fx) .+ (c.cy, c.cx)
 end
 
