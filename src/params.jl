@@ -1,4 +1,4 @@
-@with_kw struct Params
+@with_kw mutable struct Params
     max_nb_keypoints::Int = 1000
     """
     Cell size of the grid in the Frame.
@@ -28,7 +28,6 @@
     Whether or not to undistort each frame.
     """
     do_undistort::Bool = false
-    # intrinsics & extrinsics for stereo
     """
     Boolean that indicated if the vision (front-end) tracking was
     successfully initialized. Initially it is `false`.

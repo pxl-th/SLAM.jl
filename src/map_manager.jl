@@ -29,8 +29,8 @@ mutable struct MapPoint
 end
 
 MapPoint(::Val{:invalid}) = MapPoint(
-    -1, -1, Set{Int64}(), BitVector(), Dict{Int64, BitVector},
-    Point3f0(), 0f0, false, false,
+    -1, -1, Set{Int64}(), BitVector(), Dict{Int64, BitVector}(),
+    Point3f0(0, 0, 0), 0f0, false, false,
 )
 
 function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
@@ -90,7 +90,7 @@ function prepare_frame!(m::MapManager)
 
     for keypoint in get_keypoints(m.current_frame)
         # Get related MapPoint.
-        mp = get(m.map_points, keypoint.id, MapPoint(Val{:invalid}))
+        mp = get(m.map_points, keypoint.id, MapPoint(Val(:invalid)))
         if !is_valid(mp)
             remove_obs_from_current_frame!(m, keypoint.id)
             continue

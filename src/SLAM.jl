@@ -9,7 +9,8 @@ using VideoIO
 using Rotations
 using Manifolds
 using Parameters: @with_kw
-using FivePoint
+
+using RecoverPose
 
 const Point2 = SVector{2}
 const Point2i = SVector{2, Int64}
@@ -40,9 +41,15 @@ end
     CartesianIndex(x[1], x[2])
 end
 
-function expand(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
+function to_4x4(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
     m = vcat(m, SMatrix{1, 3, T}(0, 0, 0))
     hcat(m, SVector{4, T}(0, 0, 0, 1))
+end
+function to_4x4(m::SMatrix{3, 4, T})::SMatrix{4, 4, T} where T
+    vcat(m, SMatrix{1, 4, T}(0, 0, 0, 1))
+end
+function to_4x4(m, t)
+    vcat(SMatrix{3, 4}(m..., t...), SMatrix{1, 4}(0, 0, 0, 1.0))
 end
 
 include("camera.jl")

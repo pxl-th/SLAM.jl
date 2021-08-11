@@ -93,7 +93,7 @@ function check_ready_for_init(fe::FrontEnd)
     current_points = Point2f[]
     kp_ids = Int[]
 
-    # Get all Keypoint positions and compute rotation-compensated parallax.
+    # Get all Keypoint's positions and compute rotation-compensated parallax.
     for keypoint in values(fe.current_frame.keypoints)
         keypoint.id in keys(previous_keyframe.keypoints) || continue
 
@@ -124,12 +124,12 @@ function check_ready_for_init(fe::FrontEnd)
     @debug "[Front-End] 5pt parallax $avg_parallax @ $n_parallax points."
 
     # Pass points in `(y, x)` format and camera intrinsics.
-    # TODO migrate to ransac 5pt when it is ready.
-    E, P, inliers, n_inliers = five_point(
+    # TODO do something about multiple solutions returned by ransac.
+    n_inliers, (E, P, inliers) = five_point_ransac(
         previous_points, current_points,
-        fe.current_frame.camera.K,
-        fe.current_frame.camera.K,
+        fe.current_frame.camera.K, fe.current_frame.camera.K,
     )
+    @assert length(E) == 1 "[Front-End] 5pt Ransac returned multiple solutions"
     if n_inliers < 5
         @debug "[Front-End] Not enough inliers ($n_inliers) for the " *
             "5pt Essential Matrix."
@@ -138,21 +138,19 @@ function check_ready_for_init(fe::FrontEnd)
 
     @debug "[Front-End] 5pt N inliers $n_inliers."
     @debug "[Front-End] 5pt N solutions $(length(P))"
-    display(E[1]); println()
-    display(P[1]); println()
 
     # Remove outliers from the current frame.
-    for (i, inlier) in enumerate(inliers)
-        inlier && continue
-        remove_obs_from_current_frame!(fe.map_manager, kp_ids[i])
+    if n_inliers != n_parallax
+        for (i, inlier) in enumerate(inliers[1])
+            inlier && continue
+            remove_obs_from_current_frame!(fe.map_manager, kp_ids[i])
+        end
     end
-    
-    # TODO arbitrary scale for translation.
-    # TODO inverse transformation.
-    # TODO set transformation to current frame
-    # TODO return true
-    # TODO move to 3x4 pose matrices
-    false
+
+    R_inv = P[1][1:3, 1:3]'
+    t_inv = R_inv * -P[1][1:3, 4] .* 0.25 # arbitrary scale.
+    set_wc!(fe.current_frame, to_4x4(R_inv, t_inv))
+    true
 end
 
 """
@@ -183,7 +181,7 @@ function compute_parallax(
 
     current_rotation = SMatrix{3, 3, Float64}(I)
     compensate_rotation &&
-        (current_rotation = frame.getRcw() * fe.current_frame.getRwc();)
+        (current_rotation = get_Rcw(frame) * get_Rwc(fe.current_frame);)
 
     # Compute parallax.
     avg_parallax = 0.0

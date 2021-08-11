@@ -72,7 +72,7 @@ function Frame(;
     keypoints = Dict{Int64, Keypoint}()
 
     image_resolution = (camera.height, camera.width)
-    cells = image_resolution .÷ cell_size
+    cells = ceil.(Int64, image_resolution ./ cell_size)
     @debug "[Frame] Grid resolution: $cells"
     grid = [Set{Int64}() for _=1:cells[1], _=1:cells[2]]
 
