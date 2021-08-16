@@ -58,8 +58,6 @@ function track_mono(fe::FrontEnd, image, time)::Bool
     # Update motion model from estimated pose.
     update!(fe.motion_model, fe.current_frame.wc, time)
 
-    # TODO
-    @assert false
     fe |> check_new_kf_required
 end
 
@@ -138,9 +136,9 @@ function check_ready_for_init(fe::FrontEnd)
         previous_points, current_points,
         fe.current_frame.camera.K, fe.current_frame.camera.K,
     )
-    @assert length(E) == 1 "[Front-End] 5pt Ransac returned multiple solutions:\n" *
-        "\t- N inliers: $n_inliers \n" *
-        "\t- N solutions: $(length(E))"
+    # @assert length(E) == 1 "[Front-End] 5pt Ransac returned multiple solutions:\n" *
+    #     "\t- N inliers: $n_inliers \n" *
+    #     "\t- N solutions: $(length(E))"
     if n_inliers < 5
         @debug "[Front-End] Not enough inliers ($n_inliers) for the " *
             "5pt Essential Matrix."
@@ -160,6 +158,39 @@ function check_ready_for_init(fe::FrontEnd)
 
     set_wc!(fe.current_frame, inv(SE3, to_4x4(P[1])) |> SMatrix{4, 4})
     true
+end
+
+"""
+Check if we need to insert a new KeyFrame into the Map.
+"""
+function check_new_kf_required(fe::FrontEnd)::Bool
+    fe.current_frame.kfid in fe.map_manager.frames_map || return false
+    prev_kf = fe.map_manager.frames_map[fe.current_frame.kfid]
+    # Compute median parallax.
+    median_parallax = compute_parallax(
+        fe, prev_kf.kfid;
+        compensate_rotation=true, only_2d=false, median_parallax=true,
+    )
+    # Id difference since last KeyFrame.
+    frames_δ = fe.current_frame.id - prev_kf.id
+    
+    fe.current_frame.nb_occupied_cells < 0.33 * fe.params.max_nb_keypoints &&
+        frames_δ ≥ 5 && return true # TODO && !params.localba_is_on
+    fe.current_frame.nb_3d_kpts < 20 && frames_δ ≥ 2 && return true
+    fe.current_frame.nb_3d_kpts > 0.5 * fe.params.max_nb_keypoints &&
+        frames_δ < 2 && return false # TODO || params.localba_is_on
+    
+    # Time difference since last KeyFrame.
+    time_δ = fe.current_frame.time - prev_kf.time
+    # TODO option for stereo
+    cx = median_parallax ≥ fe.params.initial_parallax / 2.0 # TODO || stereo
+    c0 = median_parallax ≥ fe.params.initial_parallax
+    c1 = fe.current_frame.nb_3d_kpts < 0.75 * prev_kf.nb_3d_kpts
+    c2 = fe.current_frame.nb_occupied_cells < 0.5 * prev_kf.max_nb_keypoints &&
+        fe.current_frame.nb_3d_kpts < 0.85 * prev_kf.nb_3d_kpts
+        # TODO && params.localba_is_on
+
+    cx && (c0 || c1 || c2)
 end
 
 """

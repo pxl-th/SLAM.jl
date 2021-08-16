@@ -85,14 +85,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         map_point = mapper.map_manager.map_points[kp.id]
         map_point.is_3d && continue
 
-        if length(map_point.observer_keyframes_ids) < 2
-            @debug "[Mapper] Too few observers for a MapPoint $(map_point.id): " *
-                "$(length(map_point.observer_keyframes_ids))"
-            continue
-        else
-            @debug "[Mapper] Enough observers for a MapPoint $(map_point.id): " *
-                "$(length(map_point.observer_keyframes_ids))"
-        end
+        length(map_point.observer_keyframes_ids) < 2 && continue
         kfid = map_point.observer_keyframes_ids[1]
         frame.kfid == kfid && continue
 
@@ -102,29 +95,13 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Don't recompute if the frame's ids don't change.
         if rel_kfid != kfid
             rel_pose = observer_kf.cw * frame.wc
-            @debug "[Mapper] Rel Pose:\n" *
-                "\t- Observer KF: $(observer_kf.id), $(observer_kf.kfid) \n" *
-                "\t- Frame: $(frame.id), $(frame.kfid)\n" *
-                "\t- Rel KFID: $rel_kfid, KFID: $kfid"
-
             rel_kfid = kfid
-
-            display(frame.wc); println()
-            display(observer_kf.cw); println()
-            display(rel_pose); println()
-            println("--------------")
         end
         # Get observer keypoint.
-        if !(kp.id in keys(observer_kf.keypoints))
-            @debug "[Mapper] No observers for a Keypoint $(kp.id)"
-            continue
-        end
+        kp.id in keys(observer_kf.keypoints) || continue
         observer_kp = observer_kf.keypoints[kp.id]
-        # TODO Check rotation or normal parallax?
-        rot_px = project(
-            frame.camera, (rel_pose * SVector{4}(kp.position..., 1.0))[1:3],
-        )
-        @debug "[Mapper] px: $(observer_kp.undistorted_pixel), rot px: $rot_px"
+        # TODO Check [rotation, normal, projection] parallax?
+        rot_px = project(frame.camera, rel_pose[1:3, 1:3] * kp.position)
         parallax = norm(observer_kp.undistorted_pixel .- rot_px)
         candidates += 1
         # Compute 3D pose and check if it is good.
@@ -136,22 +113,11 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Project into the right camera (new KeyFrame).
         right_point = inv(SE3, rel_pose) * left_point
 
-        display(rel_pose); println()
-        @debug "left point $left_point"
-        @debug "right point $right_point"
-
         # Ensure that 3D point is in front of the both cameras.
         if left_point[3] < 0.1 || right_point[3] < 0.1
             parallax > 20 && remove_mappoint_obs!(
                 mapper.map_manager, observer_kp.id, frame.kfid,
             )
-            @debug "[Mapper] Point is behind both cameras:\n" *
-                "\t- mp id: $(map_point.id) \n" *
-                "\t- id: $(observer_kp.id) \n" *
-                "\t- left point: $left_point \n" *
-                "\t- right point: $right_point \n" *
-                "\t- rel pose: $rel_pose \n" *
-                "\t- N observers: $(length(map_point.observer_keyframes_ids))"
             continue
         end
         # Remove MapPoint with high reprojection error.
@@ -165,20 +131,14 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
             parallax > 20 && remove_mappoint_obs!(
                 mapper.map_manager, observer_kp.id, frame.kfid,
             )
-            @debug "[Mapper] Reprojection error is too high: \n" *
-                "\t- left projection: $left_projection, error: $left_error \n" *
-                "\t- right projection: $right_projection, error: $right_error \n" *
-                "\t- parallax: $parallax"
             continue
         end
         # 3D pose is good, update MapPoint and related Frames.
         wpt = project_camera_to_world(observer_kf, left_point)[1:3]
         update_mappoint!(mapper.map_manager, kp.id, wpt, 1.0 / left_point[3])
         good += 1
-        @debug "[Mapper] Parallax $parallax"
-        exit()
     end
-    @debug "[Mapper] Temporal triangulation: $good good KeyPoints."
+    @debug "[Mapper] Temporal triangulation: $good/$candidates good KeyPoints."
 end
 
 function get_new_kf!(mapper::Mapper)::Tuple{Bool, Union{Nothing, KeyFrame}}

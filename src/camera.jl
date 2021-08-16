@@ -83,7 +83,7 @@ function project_undistort(c::Camera, point)
     # Lens distortion coordinates.
     distorted = rd .* normalized .+ (dtx, dty)
     # Final projection (assume skew is always `0`).
-    distorted[2, 1] .* (c.fy, c.fx) .+ (c.cy, c.cx)
+    Point2f(distorted[2, 1] .* (c.fy, c.fx) .+ (c.cy, c.cx))
 end
 
 """

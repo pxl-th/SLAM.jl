@@ -210,11 +210,11 @@ get_twc(f::Frame) = f.wc[1:3, 4]
 get_tcw(f::Frame) = f.cw[1:3, 4]
 
 function project_camera_to_world(f::Frame, point)
-    f.wc * point
+    f.wc * to_homogeneous(point)
 end
 
 function project_world_to_camera(f::Frame, point)
-    f.cw * point
+    f.cw * to_homogeneous(point)
 end
 
 function project_world_to_image(f::Frame, point)

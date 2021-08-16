@@ -26,6 +26,9 @@ const SE3 = SpecialEuclidean(3)
 @inline convert(x::Vector{Point2f}) =
     Point2i[xi .|> round .|> Int64 for xi in x]
 
+@inline to_homogeneous(p::SVector{3, T}) where T = SVector{4, T}(p..., one(T))
+@inline to_homogeneous(p::SVector{4}) = p
+
 """
 Params:
     x::Point2 Point to convert to CartesianIndex in (row, col) format.
@@ -133,13 +136,13 @@ function main()
     )
     slam_manager = SlamManager(params, camera)
 
-    reader = VideoIO.openvideo("./data/5.hevc")
+    reader = VideoIO.openvideo("./data/4.hevc")
     for (i, frame) in enumerate(reader)
         frame = frame .|> Gray{Float64}
 
         run!(slam_manager, frame, i)
 
-        i == 3 && break
+        i == 50 && break
     end
     reader |> close
 end
