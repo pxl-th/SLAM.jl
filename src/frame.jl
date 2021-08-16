@@ -33,8 +33,12 @@ end
 @inline is_valid(k::Keypoint)::Bool = k.id != -1
 
 mutable struct Frame
+    """
+    Id of this Frame.
+    """
     id::Int64
     """
+    Id of the corresponding KeyFrame, which is created by Mapper.
     KeyFrame id in the MapManager.
     """
     kfid::Int64
@@ -59,6 +63,11 @@ mutable struct Frame
     nb_keypoints::Int64
     nb_2d_kpts::Int64
     nb_3d_kpts::Int64
+    """
+    Map of covisible KeyFrames.
+    KF id => Number of covisible KeyFrames with `KF id`.
+    """
+    covisible_kf::Dict{Int64, Int64}
 end
 
 function Frame(;
@@ -82,10 +91,18 @@ function Frame(;
         keypoints, grid,
         nb_occupied_cells, cell_size,
         nb_keypoints, 0, 0,
+        Dict{Int64, Int64}(),
     )
 end
 
 get_keypoints(f::Frame) = f.keypoints |> values
+function get_2d_keypoints(f::Frame)
+    keypoints = Keypoint[]
+    for k in values(f.keypoints)
+        k.is_3d || push!(keypoints, k)
+    end
+    keypoints
+end
 
 function add_keypoint!(
     f::Frame, point::Point2f, id::Int64;
@@ -95,7 +112,9 @@ function add_keypoint!(
     undistorted_point = point
     # Compute normalized 3d position of a point in (x, y, z) format.
     # Note that `point` is in `(y, x)` format.
-    position = normalize(f.camera.iK * Point3f(point[2], point[1], 1.0))
+    position = normalize(
+        f.camera.iK * Point3f(undistorted_point[2], undistorted_point[1], 1.0)
+    )
     kp = Keypoint(id, point, undistorted_point, position, descriptor, is_3d)
     add_keypoint!(f, kp)
 end
@@ -125,7 +144,9 @@ function update_keypoint!(f::Frame, id::Int64, point)
     kp.pixel = point
     # TODO undistort
     kp.undistorted_pixel = point
-    kp.position = normalize(f.camera.iK * Point3f(point[2], point[1], 1.0))
+    kp.position = normalize(f.camera.iK * Point3f(
+        kp.undistorted_pixel[2], kp.undistorted_pixel[1], 1.0
+    ))
 
     update_keypoint_in_grid!(f, ckp, kp)
     f.keypoints[id] = kp
@@ -202,4 +223,24 @@ end
 
 function project_world_to_image_distort(f::Frame, point)
     project_undistort(f.camera, project_world_to_camera(f, point))
+end
+
+function decrease_covisible_kf!(f::Frame, kfid)
+    kfid == f.kfid && return
+
+    kfid in keys(f.covisible_kf) || return
+    f.covisible_kf[kfid] == 0 && return
+    f.covisible_kf[kfid] -= 1
+    f.covisible_kf[kfid] == 0 && pop!(f.covisible_kf, kfid)
+end
+
+function turn_keypoint_3d!(f::Frame, id)
+    id in keys(f.keypoints) || return
+
+    kp = f.keypoints[id]
+    kp.is_3d && return
+
+    kp.is_3d = true
+    f.nb_2d_kpts -= 1
+    f.nb_3d_kpts += 1
 end

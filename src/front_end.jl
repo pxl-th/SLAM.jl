@@ -24,6 +24,8 @@ function track(fe::FrontEnd, image, time)
     ni = image |> copy .|> RGB
     draw_keypoints!(ni, fe.current_frame)
     save("/home/pxl-th/projects/frame-$time.png", ni)
+    
+    is_kf_required
 end
 
 function track_mono(fe::FrontEnd, image, time)::Bool
@@ -51,9 +53,14 @@ function track_mono(fe::FrontEnd, image, time)::Bool
             return false
         end
     end
-    # compute pose 2d-3d
-    # update motion model
-    false # TODO check if new kf required
+    # TODO compute pose 2d-3d
+    @assert false
+    # Update motion model from estimated pose.
+    update!(fe.motion_model, fe.current_frame.wc, time)
+
+    # TODO
+    @assert false
+    fe |> check_new_kf_required
 end
 
 """
@@ -68,7 +75,9 @@ function check_ready_for_init(fe::FrontEnd)
     fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
 
     avg_parallax = compute_parallax(
-        fe, fe.current_frame.kfid; compensate_rotation=false,
+        fe, fe.current_frame.kfid;
+        compensate_rotation=false,
+        median_parallax=true,
     )
     @debug "[Front-End] Init Avg Parallax: $avg_parallax"
     avg_parallax ≤ fe.params.initial_parallax && return false
@@ -129,7 +138,9 @@ function check_ready_for_init(fe::FrontEnd)
         previous_points, current_points,
         fe.current_frame.camera.K, fe.current_frame.camera.K,
     )
-    @assert length(E) == 1 "[Front-End] 5pt Ransac returned multiple solutions"
+    @assert length(E) == 1 "[Front-End] 5pt Ransac returned multiple solutions:\n" *
+        "\t- N inliers: $n_inliers \n" *
+        "\t- N solutions: $(length(E))"
     if n_inliers < 5
         @debug "[Front-End] Not enough inliers ($n_inliers) for the " *
             "5pt Essential Matrix."
@@ -147,9 +158,7 @@ function check_ready_for_init(fe::FrontEnd)
         end
     end
 
-    R_inv = P[1][1:3, 1:3]'
-    t_inv = R_inv * -P[1][1:3, 4] .* 0.25 # arbitrary scale.
-    set_wc!(fe.current_frame, to_4x4(R_inv, t_inv))
+    set_wc!(fe.current_frame, inv(SE3, to_4x4(P[1])) |> SMatrix{4, 4})
     true
 end
 

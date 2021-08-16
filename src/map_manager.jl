@@ -1,65 +1,12 @@
-mutable struct MapPoint
-    id::Int64
-    """
-    Anchored position: kfid + position + inv_depth.
-    """
-    kfid::Int64
-    """
-    Set of KeyFrame's ids that are visible from this MapPoint.
-    """
-    observer_keyframes_ids::Set{Int64}
-    """
-    Mean descriptor.
-    """
-    descriptor::BitVector
-    keyframes_descriptors::Dict{Int64, BitVector}
-    """
-    Anchored position: kfid + position + inv_depth.
-    """
-    position::Point3f0
-    inv_depth::Float32
-    """
-    True if the MapPoint has been initialized.
-    """
-    is_3d::Bool
-    """
-    True if the MapPoint is visible in the current frame.
-    """
-    is_observed::Bool
-end
-
-MapPoint(::Val{:invalid}) = MapPoint(
-    -1, -1, Set{Int64}(), BitVector(), Dict{Int64, BitVector}(),
-    Point3f0(0, 0, 0), 0f0, false, false,
-)
-
-function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
-    observed_keyframes_ids = Set{Int64}(kfid)
-    keyframes_descriptors = Dict{Int64, BitVector}(kfid => descriptor)
-    position = Point3f0(0f0, 0f0, 0f0)
-    inv_depth = 0f0
-    is_3d = false
-
-    MapPoint(
-        id, kfid, observed_keyframes_ids,
-        descriptor, keyframes_descriptors,
-        Point3f0(0f0, 0f0, 0f0), 0f0,
-        is_3d, is_observed,
-    )
-end
-
-@inline is_valid(m::MapPoint)::Bool = m.id != -1
-
-@inline add_keyframe_observation!(m::MapPoint, id::Int64) =
-    push!(m.observer_keyframes_ids, id)
-
 mutable struct MapManager
     current_frame::Frame
+    """
+    KeyFrame id => Frame.
+    """
     frames_map::Dict{Int64, Frame}
 
     params::Params
     extractor::Extractor
-    # tracker::Tracker
 
     map_points::Dict{Int64, MapPoint}
     current_mappoint_id::Int64
@@ -104,7 +51,6 @@ function extract_keypoints!(m::MapManager, image)
     keypoints = m.current_frame |> get_keypoints
     current_points = [kp.pixel for kp in keypoints]
 
-    # describe keypoints if using brief
     nb_2_detect = m.params.max_nb_keypoints - m.current_frame.nb_occupied_cells
     nb_2_detect ≤ 0 && return
     # Detect keypoints in the provided `image` using current keypoints
@@ -112,6 +58,7 @@ function extract_keypoints!(m::MapManager, image)
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
 
+    # TODO describe keypoints & update mappoint descriptors.
     descriptors, keypoints = describe(m.extractor, image, keypoints)
     @debug "[Map Manager] Extracted $(length(keypoints)) keypoints."
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
@@ -160,4 +107,46 @@ function remove_obs_from_current_frame!(m::MapManager, id::Int64)
     #     # TODO Reset point in point-cloud to origin-point.
     #     return
     # end
+end
+
+"""
+Remove KeyFrame observation from MapPoint.
+"""
+function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
+    # Remove MapPoint from KeyFrame.
+    frame_exists = kfid in keys(m.frames_map)
+    frame_exists && remove_keypoint!(m.frames_map[kfid], kpid)
+    # Remove KeyFrame observation from MapPoint.
+    kpid in keys(m.map_points) || return
+    mappoint = m.map_points[kpid]
+    remove_kf_observation!(mappoint, kfid)
+    
+    frame_exists || return
+    frame = m.frames_map[kfid]
+    for observer_id in mappoint.observer_keyframes_ids
+        observer_id in keys(m.frames_map) || continue
+        decrease_covisible_kf!(frame, observer_id)
+        decrease_covisible_kf!(m.frames_map[observer_id], kfid)
+    end
+end
+
+"""
+Update position of a MapPoint.
+"""
+function update_mappoint!(m::MapManager, kpid::Int, new_position, inv_depth)
+    kpid in keys(m.map_points) || return
+    mp = m.map_points[kpid]
+    # If MapPoint is 2D, turn it to 3D and update its observing KeyFrames.
+    if !mp.is_3d
+        for observer_id in mp.observer_keyframes_ids
+            if observer_id in keys(m.frames_map)
+                turn_keypoint_3d!(m.frames_map[observer_id], kpid)
+            else
+                remove_kf_observation!(mp, observer_id)
+            end
+        end
+        mp.is_observed && turn_keypoint_3d!(m.current_frame, kpid)
+    end
+    # Update world position.
+    set_position!(mp, new_position, inv_depth ≥ 0 ? inv_depth : -1)
 end

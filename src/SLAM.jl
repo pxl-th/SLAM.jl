@@ -9,6 +9,7 @@ using VideoIO
 using Rotations
 using Manifolds
 using Parameters: @with_kw
+using DataStructures: OrderedSet
 
 using RecoverPose
 
@@ -22,7 +23,6 @@ const Point3f0 = SVector{3, Float32}
 const SE3 = SpecialEuclidean(3)
 
 @inline convert(x::Point2f)::Point2i = x .|> round .|> Int64
-# @inline convert(x::Point2)::Point2i = x .|> round .|> Int64
 @inline convert(x::Vector{Point2f}) =
     Point2i[xi .|> round .|> Int64 for xi in x]
 
@@ -30,15 +30,10 @@ const SE3 = SpecialEuclidean(3)
 Params:
     x::Point2 Point to convert to CartesianIndex in (row, col) format.
 """
-@inline function to_cartesian(x)
-    # x = x |> convert
-    # CartesianIndex(x[1], x[2])
-    CartesianIndex(convert(x)...)
-end
-
+@inline to_cartesian(x) = CartesianIndex(convert(x)...)
 @inline function to_cartesian(x::Point2, cell_size::Int64)
     x = convert(x) .÷ cell_size .+ 1
-    CartesianIndex(x[1], x[2])
+    CartesianIndex(x...)
 end
 
 function to_4x4(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
@@ -56,9 +51,6 @@ include("camera.jl")
 include("extractor.jl")
 include("tracker.jl")
 
-# - Visual front end processes each image (and creates keyframes via mapmanager)
-# - Puts Keyframes into Mapper
-
 function extract_fast(image, n_keypoints::Int64, threshold::Float64 = 0.4)
     fastcorners(image, n_keypoints, threshold) |> Keypoints
 end
@@ -66,16 +58,11 @@ end
 include("params.jl")
 include("frame.jl")
 
-struct KeyFrame
-    id::Int64
-    image::Matrix{Gray}
-    # optical flow pyramid levels
-    # raw image
-end
-
 include("motion_model.jl")
+include("map_point.jl")
 include("map_manager.jl")
 include("front_end.jl")
+include("mapper.jl")
 
 mutable struct SlamManager
     image_queue::Vector{Matrix{Gray}}
@@ -84,6 +71,7 @@ mutable struct SlamManager
 
     front_end::FrontEnd
     map_manager::MapManager
+    mapper::Mapper
     extractor::Extractor
 
     camera::Camera
@@ -97,10 +85,11 @@ function SlamManager(
     extractor = Extractor(params.max_nb_keypoints, BRIEF())
     map_manager = MapManager(params, frame, extractor)
     front_end = FrontEnd(params, frame, map_manager)
+    mapper = Mapper(params, map_manager, frame)
 
     SlamManager(
         [], frame, frame.id,
-        front_end, map_manager, extractor,
+        front_end, map_manager, mapper, extractor,
         camera, false,
     )
 end
@@ -112,12 +101,21 @@ function run!(sm::SlamManager, image, time)
     sm.current_frame.id = sm.frame_id
     sm.current_frame.time = time
     @debug "[Slam Manager] Frame $(sm.frame_id) @ $time"
+    @debug "[Slam Manager] Fid $(sm.current_frame.id), KFid $(sm.current_frame.kfid)"
 
-    # Send image to front end.
+    # Send image to the front end.
     is_kf_required = track(sm.front_end, image, time)
+
     # TODO check for reset `params.reset_required`
-    # TODO create new kf if needed (which is a copy from frontend)
-    # TODO send new kf to mapper to add to its queue
+
+    # Create new KeyFrame if needed.
+    # Send it to the mapper queue for traingulation.
+    is_kf_required || return
+
+    @debug "[Slam Manager] Adding new KeyFrame to Mapper @ $(sm.current_frame.kfid) id"
+    add_new_kf!(sm.mapper, KeyFrame(sm.current_frame.kfid, image))
+    @debug "[Slam Manager] Running Mapper routine."
+    sm.mapper |> run!
 end
 
 function draw_keypoints!(image, frame::Frame)

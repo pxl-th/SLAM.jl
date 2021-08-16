@@ -42,4 +42,9 @@
     Amount of parallax (in pixels) needed for initialization system to kick in.
     """
     initial_parallax::Real = 10.0
+    """
+    Maximum allowed reprojection error.
+    Used during triangulation in Mapper to discard outliers.
+    """
+    max_reprojection_error = 3.0
 end
