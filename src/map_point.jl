@@ -20,8 +20,8 @@ mutable struct MapPoint
     """
     Anchored position: kfid + position + inv_depth.
     """
-    position::Point3f0
-    inv_depth::Float32
+    position::Point3f
+    inv_depth::Float64
     """
     True if the MapPoint has been initialized.
     """
@@ -35,7 +35,7 @@ end
 MapPoint(::Val{:invalid}) = MapPoint(
     -1, -1, Set{Int64}(),
     BitVector(), Dict{Int64, BitVector}(), Dict{Int64, Float64}(),
-    Point3f0(0, 0, 0), 0f0, false, false,
+    Point3f(0, 0, 0), 0, false, false,
 )
 
 function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
@@ -43,14 +43,14 @@ function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
     keyframes_descriptors = Dict{Int64, BitVector}(kfid => descriptor)
     descriptor_distances_map = Dict{Int64, Float64}(kfid => 0.0)
 
-    position = Point3f0(0f0, 0f0, 0f0)
-    inv_depth = 0f0
+    position = Point3f(0, 0, 0)
+    inv_depth = 0
     is_3d = false
 
     MapPoint(
         id, kfid, observed_keyframes_ids,
         descriptor, keyframes_descriptors, descriptor_distances_map,
-        Point3f0(0f0, 0f0, 0f0), 0f0,
+        position, inv_depth,
         is_3d, is_observed,
     )
 end

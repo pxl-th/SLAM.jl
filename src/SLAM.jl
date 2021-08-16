@@ -123,6 +123,7 @@ end
 
 function draw_keypoints!(image, frame::Frame)
     for kp in values(frame.keypoints)
+        in_image(frame.camera, kp.pixel) || continue
         image[kp.pixel |> to_cartesian] = RGB(1, 0, 0)
     end
 end
@@ -134,6 +135,7 @@ function main()
         0, 0, 0, 0,
         874, 1164,
     )
+    # TODO when projecting to image plane, indexing should start from 1 or 0?
     slam_manager = SlamManager(params, camera)
 
     reader = VideoIO.openvideo("./data/4.hevc")

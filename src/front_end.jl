@@ -6,11 +6,13 @@ mutable struct FrontEnd
 
     current_image::Matrix{Gray}
     previous_image::Matrix{Gray}
+
+    p3p_required::Bool
 end
 
 FrontEnd(params::Params, frame::Frame, map_manager::MapManager) = FrontEnd(
     frame, MotionModel(), map_manager, params,
-    Matrix{Gray}(undef, 0, 0), Matrix{Gray}(undef, 0, 0),
+    Matrix{Gray}(undef, 0, 0), Matrix{Gray}(undef, 0, 0), false,
 )
 
 function track(fe::FrontEnd, image, time)
@@ -24,7 +26,7 @@ function track(fe::FrontEnd, image, time)
     ni = image |> copy .|> RGB
     draw_keypoints!(ni, fe.current_frame)
     save("/home/pxl-th/projects/frame-$time.png", ni)
-    
+
     is_kf_required
 end
 
@@ -44,7 +46,7 @@ function track_mono(fe::FrontEnd, image, time)::Bool
         if fe.current_frame.nb_keypoints < 50
             fe.params.reset_required = true
             return false
-        elseif check_ready_for_init(fe)
+        elseif check_ready_for_init!(fe)
             @debug "[Front End] System ready for initialization."
             fe.params.vision_initialized = true
             return true
@@ -53,12 +55,70 @@ function track_mono(fe::FrontEnd, image, time)::Bool
             return false
         end
     end
-    # TODO compute pose 2d-3d
-    @assert false
+    fe |> compute_pose!
     # Update motion model from estimated pose.
     update!(fe.motion_model, fe.current_frame.wc, time)
-
     fe |> check_new_kf_required
+end
+
+"""
+Compute pose of a current Frame using P3P Ransac algorithm.
+"""
+function compute_pose!(fe::FrontEnd)
+    if fe.current_frame.nb_3d_kpts < 4
+        @debug "[Front-End] Not enough 3D keypoints to compute P3P."
+        return
+    end
+
+    # TODO for now we always do p3p, since there is no BA.
+    # do_p3p = fe.p3p_required || fe.params.do_p3p
+    do_p3p = true
+
+    p3p_pixels = Point2f[]
+    p3p_pdn_positions = Point3f[]
+    p3p_3d_points = Point3f[]
+    p3p_kpids = Int64[]
+
+    for kp in values(fe.current_frame.keypoints)
+        kp.is_3d || continue
+        kp.id in keys(fe.map_manager.map_points) || continue
+
+        mp = fe.map_manager.map_points[kp.id]
+        do_p3p && push!(p3p_pdn_positions, kp.position)
+        # Convert pixel to `(x, y)` format, expected by P3P.
+        push!(p3p_pixels, SVector{2, Float64}(
+            kp.undistorted_pixel[2], kp.undistorted_pixel[1],
+        ))
+        push!(p3p_3d_points, mp.position)
+        push!(p3p_kpids, kp.id)
+    end
+
+    @debug "[Front-End] P3P N points: $(length(p3p_pixels))"
+
+    # TODO if do_p3p
+    n_inliers, (P, inliers, error) = p3p_ransac(
+        p3p_3d_points, p3p_pixels, p3p_pdn_positions, fe.current_frame.camera.K;
+        threshold=fe.params.max_reprojection_error,
+    )
+    if n_inliers < 5
+        @debug "[Front-End] Not enough inliers for reliable P3P pose estimation."
+        fe |> reset_frame!
+        return
+    end
+    @debug "[Front-End] P3P N inliers: $n_inliers"
+
+    # Remove outliers after P3P.
+    for (kpid, inlier) in zip(p3p_kpids, inliers)
+        inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
+    end
+    # Resulting projection is in `K * [R|t]` format, remove K part.
+    P = fe.current_frame.camera.iK * P
+    P = inv(SE3, to_4x4(P)) |> SMatrix{4, 4, Float64}
+    set_wc!(fe.current_frame, P)
+
+    # TODO motion-only BA + remove outliers again.
+
+    fe.p3p_required = false
 end
 
 """
@@ -68,7 +128,7 @@ between current Frame and previous KeyFrame.
 Additionally, compute Essential matrix using 5-point Ransac algorithm
 to filter out outliers and check if there is enough inliers to proceed.
 """
-function check_ready_for_init(fe::FrontEnd)
+function check_ready_for_init!(fe::FrontEnd)
     # Get previous keyframe.
     fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
 
@@ -164,7 +224,7 @@ end
 Check if we need to insert a new KeyFrame into the Map.
 """
 function check_new_kf_required(fe::FrontEnd)::Bool
-    fe.current_frame.kfid in fe.map_manager.frames_map || return false
+    fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
     prev_kf = fe.map_manager.frames_map[fe.current_frame.kfid]
     # Compute median parallax.
     median_parallax = compute_parallax(
@@ -173,20 +233,19 @@ function check_new_kf_required(fe::FrontEnd)::Bool
     )
     # Id difference since last KeyFrame.
     frames_δ = fe.current_frame.id - prev_kf.id
-    
     fe.current_frame.nb_occupied_cells < 0.33 * fe.params.max_nb_keypoints &&
         frames_δ ≥ 5 && return true # TODO && !params.localba_is_on
     fe.current_frame.nb_3d_kpts < 20 && frames_δ ≥ 2 && return true
     fe.current_frame.nb_3d_kpts > 0.5 * fe.params.max_nb_keypoints &&
         frames_δ < 2 && return false # TODO || params.localba_is_on
-    
+
     # Time difference since last KeyFrame.
     time_δ = fe.current_frame.time - prev_kf.time
     # TODO option for stereo
     cx = median_parallax ≥ fe.params.initial_parallax / 2.0 # TODO || stereo
     c0 = median_parallax ≥ fe.params.initial_parallax
     c1 = fe.current_frame.nb_3d_kpts < 0.75 * prev_kf.nb_3d_kpts
-    c2 = fe.current_frame.nb_occupied_cells < 0.5 * prev_kf.max_nb_keypoints &&
+    c2 = fe.current_frame.nb_occupied_cells < 0.5 * fe.params.max_nb_keypoints &&
         fe.current_frame.nb_3d_kpts < 0.85 * prev_kf.nb_3d_kpts
         # TODO && params.localba_is_on
 
@@ -355,7 +414,7 @@ function ktl_tracking!(fe::FrontEnd)
     # Either update or remove current keypoints.
     nb_good = 0
     for i in 1:length(new_keypoints)
-        if status[i]
+        if status[i] && in_image(fe.current_frame.camera, new_keypoints[i])
             update_keypoint!(fe.current_frame, prior_ids[i], new_keypoints[i])
             nb_good += 1
         else

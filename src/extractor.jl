@@ -27,6 +27,7 @@ end
 """
 TODO roi support
 TODO mask support
+TODO avoid regions with keypoints, otherwise we get a lot of duplicates.
 
 Returns:
     Keypoints in the (y, x) format.
