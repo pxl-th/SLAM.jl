@@ -48,26 +48,24 @@ function prepare_frame!(m::MapManager)
 end
 
 function extract_keypoints!(m::MapManager, image)
-    keypoints = m.current_frame |> get_keypoints
-    current_points = [kp.pixel for kp in keypoints]
+    current_points = [kp.pixel for kp in values(m.current_frame.keypoints)]
 
     nb_2_detect = m.params.max_nb_keypoints - m.current_frame.nb_occupied_cells
     nb_2_detect ≤ 0 && return
-    # Detect keypoints in the provided `image` using current keypoints
-    # and roi to set a mask.
+    # Detect keypoints in the provided `image`
+    # using current keypoints to set a mask of regions
+    # to avoid detecting features in.
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
 
     # TODO describe keypoints & update mappoint descriptors.
     descriptors, keypoints = describe(m.extractor, image, keypoints)
-    @debug "[Map Manager] Extracted $(length(keypoints)) keypoints."
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
 end
 
 function add_keypoints_to_frame!(
     m::MapManager, frame::Frame, keypoints, descriptors,
 )
-    @debug "[Map Manager] N Keypoints $(length(keypoints))"
     for (kp, dp) in zip(keypoints, descriptors)
         # m.current_mappoint_id is incremented in `add_mappoint!`.
         pixel = Point2f(kp[1], kp[2])

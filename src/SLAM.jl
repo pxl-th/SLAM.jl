@@ -3,6 +3,7 @@ module SLAM
 using LinearAlgebra
 using StaticArrays
 using Images
+using ImageDraw
 using ImageFeatures
 using ImageTracking
 using VideoIO
@@ -81,11 +82,11 @@ mutable struct SlamManager
     exit_required::Bool
 end
 
-function SlamManager(
-    params::Params, camera::Camera,
-)
+function SlamManager(params::Params, camera::Camera)
+    avoidance_radius = max(5, params.max_distance ÷ 2)
+
     frame = Frame(;camera=camera, cell_size=params.max_distance)
-    extractor = Extractor(params.max_nb_keypoints, BRIEF())
+    extractor = Extractor(params.max_nb_keypoints, avoidance_radius)
     map_manager = MapManager(params, frame, extractor)
     front_end = FrontEnd(params, frame, map_manager)
     mapper = Mapper(params, map_manager, frame)
@@ -129,22 +130,23 @@ function draw_keypoints!(image, frame::Frame)
 end
 
 function main()
+    focal = 910
+    width, height = 1164, 874
+    cx, cy = width ÷ 2, height ÷ 2
+
     params = Params()
     camera = Camera(
-        910, 910, 582, 437,
+        focal, focal, cx, cy,
         0, 0, 0, 0,
-        874, 1164,
+        height, width,
     )
-    # TODO when projecting to image plane, indexing should start from 1 or 0?
     slam_manager = SlamManager(params, camera)
 
     reader = VideoIO.openvideo("./data/4.hevc")
     for (i, frame) in enumerate(reader)
         frame = frame .|> Gray{Float64}
-
         run!(slam_manager, frame, i)
-
-        i == 50 && break
+        i == 100 && break
     end
     reader |> close
 end

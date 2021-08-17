@@ -1,6 +1,7 @@
 using LinearAlgebra
 using StaticArrays
 using Images
+using ImageDraw
 using ImageFeatures
 using ImageTracking
 using VideoIO

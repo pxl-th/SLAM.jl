@@ -5,6 +5,7 @@ create_sysimage(
         :LinearAlgebra,
         :StaticArrays,
         :Images,
+        :ImageDraw,
         :ImageFeatures,
         :ImageTracking,
         :VideoIO,
