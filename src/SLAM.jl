@@ -69,7 +69,9 @@ include("front_end.jl")
 include("mapper.jl")
 
 mutable struct SlamManager
-    image_queue::Vector{Matrix{Gray}}
+    params::Params
+
+    image_queue::Vector{Matrix{Gray{Float64}}}
     current_frame::Frame
     frame_id::Int64
 
@@ -92,6 +94,7 @@ function SlamManager(params::Params, camera::Camera)
     mapper = Mapper(params, map_manager, frame)
 
     SlamManager(
+        params,
         [], frame, frame.id,
         front_end, map_manager, mapper, extractor,
         camera, false,
@@ -109,16 +112,12 @@ function run!(sm::SlamManager, image, time)
 
     # Send image to the front end.
     is_kf_required = track!(sm.front_end, image, time)
-
-    # TODO check for reset `params.reset_required`
-
+    sm.params.reset_required && reset!(sm)
     # Create new KeyFrame if needed.
     # Send it to the mapper queue for traingulation.
     is_kf_required || return
 
-    @debug "[Slam Manager] Adding new KeyFrame to Mapper @ $(sm.current_frame.kfid) id"
     add_new_kf!(sm.mapper, KeyFrame(sm.current_frame.kfid, image))
-    @debug "[Slam Manager] Running Mapper routine."
     sm.mapper |> run!
 end
 
@@ -129,6 +128,16 @@ function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
         color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
         draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
     end
+end
+
+function reset!(sm::SlamManager)
+    @warn "[Slam Manager] Reset required."
+    sm.params |> reset!
+
+    sm.current_frame |> reset!
+    sm.front_end |> reset!
+    sm.map_manager |> reset!
+    @warn "[Slam Manager] Reset applied."
 end
 
 function main()
@@ -160,7 +169,7 @@ function main()
         draw_keypoints!(vframe, slam_manager.front_end.current_frame)
         write(writer, vframe)
 
-        # i == 100 && break
+        # i == 300 && break
     end
 
     end

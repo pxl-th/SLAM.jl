@@ -237,3 +237,18 @@ function turn_keypoint_3d!(f::Frame, id)
     f.nb_2d_kpts -= 1
     f.nb_3d_kpts += 1
 end
+
+function reset!(f::Frame)
+    f.nb_2d_kpts = 0
+    f.nb_3d_kpts = 0
+    f.nb_keypoints = 0
+    f.nb_occupied_cells = 0
+    f.time = 0
+
+    f.keypoints |> empty!
+    f.keypoints_grid .|> empty!
+    f.covisible_kf |> empty!
+
+    f.wc = SMatrix{4, 4, Float64}(I)
+    f.cw = SMatrix{4, 4, Float64}(I)
+end

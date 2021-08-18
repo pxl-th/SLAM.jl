@@ -55,3 +55,8 @@
     """
     do_p3p::Bool = true
 end
+
+function reset!(p::Params)
+    p.vision_initialized = false
+    p.reset_required = false
+end

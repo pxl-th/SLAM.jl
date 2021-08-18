@@ -28,7 +28,6 @@ end
 
 function track!(fe::FrontEnd, image, time)
     is_kf_required = track_mono!(fe, image, time)
-    @debug "[Front-End] Is KF required $is_kf_required @ $time"
     if is_kf_required
         create_keyframe!(fe.map_manager, image)
         fe.keyframe_pyramid = fe.current_pyramid
@@ -39,12 +38,11 @@ end
 function track_mono!(fe::FrontEnd, image, time)::Bool
     preprocess!(fe, image)
     # If it's the first frame, then KeyFrame is always needed.
-    @debug "[Front End] Current Frame id $(fe.current_frame.id), kfid $(fe.current_frame.kfid)"
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
     new_wc = fe.motion_model(fe.current_frame.wc, time)
     @debug "[Front End] New wc"
-    display(new_wc); println()
+    # display(new_wc); println()
 
     set_wc!(fe.current_frame, new_wc)
     # track new image
@@ -94,7 +92,7 @@ function compute_pose!(fe::FrontEnd)
         mp = fe.map_manager.map_points[kp.id]
         do_p3p && push!(p3p_pdn_positions, kp.position)
         # Convert pixel to `(x, y)` format, expected by P3P.
-        push!(p3p_pixels, SVector{2, Float64}(
+        push!(p3p_pixels, Point2f(
             kp.undistorted_pixel[2], kp.undistorted_pixel[1],
         ))
         push!(p3p_3d_points, mp.position)
@@ -110,12 +108,10 @@ function compute_pose!(fe::FrontEnd)
     )
     if n_inliers < 5
         @debug "[Front-End] Not enough inliers for reliable P3P pose estimation."
-        # TODO not implemented
         fe |> reset_frame!
         return
     end
     @debug "[Front-End] P3P N inliers: $n_inliers"
-
     # Remove outliers after P3P.
     for (kpid, inlier) in zip(p3p_kpids, inliers)
         inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
@@ -126,7 +122,7 @@ function compute_pose!(fe::FrontEnd)
     set_wc!(fe.current_frame, P)
 
     @debug "[Front-End] New wc after P3P"
-    display(fe.current_frame.wc); println()
+    # display(fe.current_frame.wc); println()
 
     # TODO motion-only BA + remove outliers again.
     fe.p3p_required = false
@@ -161,8 +157,6 @@ function check_ready_for_init!(fe::FrontEnd)
 
     # Setup Essential matrix computation.
     R_compensation = get_Rcw(previous_keyframe) * get_Rwc(fe.current_frame)
-    @debug "[Front-End] R_compensation:"
-    display(R_compensation); println()
 
     n_parallax = 0
     avg_parallax = 0.0
@@ -318,7 +312,6 @@ function compute_parallax(
         median_parallax && push!(parallax_set, parallax)
     end
 
-    @debug "[Front-End] Number parallax $n_parallax"
     n_parallax == 0 && return 0.0
 
     if median_parallax
@@ -354,7 +347,6 @@ end
 
 function klt_tracking(fe::FrontEnd)
     @debug "[Front-End] KTL Tracking"
-
     priors = Point2f[]
     prior_ids = Int64[]
     prior_pixels = Point2f[]
@@ -456,7 +448,13 @@ function reset_frame!(fe::FrontEnd)
 end
 
 function reset!(fe::FrontEnd)
-    # TODO empty pyramids
+    empty_pyr = ImageTracking.LKPyramid(
+        [Matrix{Gray{Float64}}(undef, 0, 0)],
+        nothing, nothing, nothing, nothing, nothing,
+    )
+    fe.keyframe_pyramid = empty_pyr
+    fe.previous_pyramid = empty_pyr
+    fe.current_pyramid = empty_pyr
 end
 
 # TODO klt_tracking_kf

@@ -143,3 +143,13 @@ function update_mappoint!(m::MapManager, kpid::Int, new_position, inv_depth)
     # Update world position.
     set_position!(mp, new_position, inv_depth ≥ 0 ? inv_depth : -1)
 end
+
+function reset!(m::MapManager)
+    m.nb_keyframes = 0
+    m.nb_mappoints = 0
+    m.current_keyframe_id = 0
+    m.current_mappoint_id = 0
+
+    m.map_points |> empty!
+    m.frames_map |> empty!
+end
