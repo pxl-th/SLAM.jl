@@ -9,3 +9,4 @@ using Rotations
 using Manifolds
 using Parameters
 using DataStructures
+using GLMakie
