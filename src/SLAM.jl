@@ -122,10 +122,13 @@ function run!(sm::SlamManager, image, time)
     sm.mapper |> run!
 end
 
-function draw_keypoints!(image, frame::Frame)
+function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
+    radius = 2
     for kp in values(frame.keypoints)
         in_image(frame.camera, kp.pixel) || continue
-        image[kp.pixel |> to_cartesian] = RGB(1, 0, 0)
+        color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
+        draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
+        # image[kp.pixel |> to_cartesian] = RGB(1, 0, 0)
     end
 end
 
@@ -146,7 +149,7 @@ function main()
     for (i, frame) in enumerate(reader)
         frame = frame .|> Gray{Float64}
         run!(slam_manager, frame, i)
-        i == 100 && break
+        # i == 100 && break
     end
     reader |> close
 end

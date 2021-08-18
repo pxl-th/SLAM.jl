@@ -37,7 +37,9 @@ function track_mono(fe::FrontEnd, image, time)::Bool
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
     new_wc = fe.motion_model(fe.current_frame.wc, time)
-    @debug "[Front End] New wc $new_wc"
+    @debug "[Front End] New wc"
+    display(new_wc); println()
+
     set_wc!(fe.current_frame, new_wc)
     # track new image
     fe |> ktl_tracking!
@@ -102,6 +104,7 @@ function compute_pose!(fe::FrontEnd)
     )
     if n_inliers < 5
         @debug "[Front-End] Not enough inliers for reliable P3P pose estimation."
+        # TODO not implemented
         fe |> reset_frame!
         return
     end
@@ -116,8 +119,10 @@ function compute_pose!(fe::FrontEnd)
     P = inv(SE3, to_4x4(P)) |> SMatrix{4, 4, Float64}
     set_wc!(fe.current_frame, P)
 
-    # TODO motion-only BA + remove outliers again.
+    @debug "[Front-End] New wc after P3P"
+    display(fe.current_frame.wc); println()
 
+    # TODO motion-only BA + remove outliers again.
     fe.p3p_required = false
 end
 

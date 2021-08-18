@@ -68,8 +68,7 @@ function add_keypoints_to_frame!(
 )
     for (kp, dp) in zip(keypoints, descriptors)
         # m.current_mappoint_id is incremented in `add_mappoint!`.
-        pixel = Point2f(kp[1], kp[2])
-        add_keypoint!(frame, pixel, m.current_mappoint_id)
+        add_keypoint!(frame, Point2f(kp[1], kp[2]), m.current_mappoint_id)
         add_mappoint!(m, dp)
     end
 end

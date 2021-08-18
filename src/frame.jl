@@ -108,13 +108,10 @@ function add_keypoint!(
     f::Frame, point::Point2f, id::Int64;
     descriptor::BitVector = BitVector(), is_3d::Bool = false,
 )
-    # TODO undistort `point` using calibration model
-    undistorted_point = point
-    # Compute normalized 3d position of a point in (x, y, z) format.
+    undistorted_point = undistort_point(f.camera, point)
+    # Compute normalized 3d position of a point in `(x, y, z)` format.
     # Note that `point` is in `(y, x)` format.
-    position = normalize(
-        f.camera.iK * Point3f(undistorted_point[2], undistorted_point[1], 1.0)
-    )
+    position = backproject(f.camera, undistorted_point) |> normalize
     kp = Keypoint(id, point, undistorted_point, position, descriptor, is_3d)
     add_keypoint!(f, kp)
 end
@@ -142,11 +139,8 @@ function update_keypoint!(f::Frame, id::Int64, point)
 
     kp = ckp |> deepcopy
     kp.pixel = point
-    # TODO undistort
-    kp.undistorted_pixel = point
-    kp.position = normalize(f.camera.iK * Point3f(
-        kp.undistorted_pixel[2], kp.undistorted_pixel[1], 1.0
-    ))
+    kp.undistorted_pixel = undistort_point(f.camera, kp.pixel)
+    kp.position = backproject(f.camera, kp.undistorted_pixel) |> normalize
 
     update_keypoint_in_grid!(f, ckp, kp)
     f.keypoints[id] = kp
@@ -171,7 +165,6 @@ function add_keypoint_to_grid!(f::Frame, keypoint::Keypoint)
 end
 
 function remove_keypoint!(f::Frame, id::Int64)
-    # TODO invalid keypoint constructed in any case.
     kp = get(f.keypoints, id, Keypoint(Val(:invalid)))
     is_valid(kp) || return
 
