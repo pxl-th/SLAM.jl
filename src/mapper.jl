@@ -1,8 +1,6 @@
 struct KeyFrame
     id::Int64
     image::Matrix{Gray}
-    # optical flow pyramid levels
-    # raw image (colored)
 end
 
 mutable struct Mapper
@@ -100,7 +98,6 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Get observer keypoint.
         kp.id in keys(observer_kf.keypoints) || continue
         observer_kp = observer_kf.keypoints[kp.id]
-        # TODO Check [rotation, normal, projection] parallax?
         rot_px = project(frame.camera, rel_pose[1:3, 1:3] * kp.position)
         parallax = norm(observer_kp.undistorted_pixel .- rot_px)
         candidates += 1

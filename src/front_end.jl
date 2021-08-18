@@ -4,33 +4,39 @@ mutable struct FrontEnd
     map_manager::MapManager
     params::Params
 
-    current_image::Matrix{Gray}
-    previous_image::Matrix{Gray}
+    current_image::Matrix{Gray{Float64}}
+    previous_image::Matrix{Gray{Float64}}
+
+    current_pyramid::ImageTracking.LKPyramid
+    previous_pyramid::ImageTracking.LKPyramid
+    keyframe_pyramid::ImageTracking.LKPyramid
 
     p3p_required::Bool
 end
 
-FrontEnd(params::Params, frame::Frame, map_manager::MapManager) = FrontEnd(
-    frame, MotionModel(), map_manager, params,
-    Matrix{Gray}(undef, 0, 0), Matrix{Gray}(undef, 0, 0), false,
-)
+function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
+    empty_pyr = ImageTracking.LKPyramid(
+        [Matrix{Gray{Float64}}(undef, 0, 0)],
+        nothing, nothing, nothing, nothing, nothing,
+    )
+    FrontEnd(
+        frame, MotionModel(), map_manager, params,
+        Matrix{Gray{Float64}}(undef, 0, 0), Matrix{Gray{Float64}}(undef, 0, 0),
+        empty_pyr, empty_pyr, empty_pyr, false,
+    )
+end
 
-function track(fe::FrontEnd, image, time)
-    is_kf_required = track_mono(fe, image, time)
+function track!(fe::FrontEnd, image, time)
+    is_kf_required = track_mono!(fe, image, time)
     @debug "[Front-End] Is KF required $is_kf_required @ $time"
     if is_kf_required
         create_keyframe!(fe.map_manager, image)
-        # TODO build optial flow pyramid and reuse it in optical flow
+        fe.keyframe_pyramid = fe.current_pyramid
     end
-
-    ni = image |> copy .|> RGB
-    draw_keypoints!(ni, fe.current_frame)
-    save("/home/pxl-th/projects/frame-$time.png", ni)
-
     is_kf_required
 end
 
-function track_mono(fe::FrontEnd, image, time)::Bool
+function track_mono!(fe::FrontEnd, image, time)::Bool
     preprocess!(fe, image)
     # If it's the first frame, then KeyFrame is always needed.
     @debug "[Front End] Current Frame id $(fe.current_frame.id), kfid $(fe.current_frame.kfid)"
@@ -42,8 +48,8 @@ function track_mono(fe::FrontEnd, image, time)::Bool
 
     set_wc!(fe.current_frame, new_wc)
     # track new image
-    fe |> ktl_tracking!
-    # epipolar filtering
+    fe |> klt_tracking
+    # TODO epipolar filtering
     if !fe.params.vision_initialized
         if fe.current_frame.nb_keypoints < 50
             fe.params.reset_required = true
@@ -231,11 +237,7 @@ Check if we need to insert a new KeyFrame into the Map.
 function check_new_kf_required(fe::FrontEnd)::Bool
     fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
     prev_kf = fe.map_manager.frames_map[fe.current_frame.kfid]
-    # Compute median parallax.
-    median_parallax = compute_parallax(
-        fe, prev_kf.kfid;
-        compensate_rotation=true, only_2d=false, median_parallax=true,
-    )
+
     # Id difference since last KeyFrame.
     frames_δ = fe.current_frame.id - prev_kf.id
     fe.current_frame.nb_occupied_cells < 0.33 * fe.params.max_nb_keypoints &&
@@ -247,6 +249,9 @@ function check_new_kf_required(fe::FrontEnd)::Bool
     # Time difference since last KeyFrame.
     time_δ = fe.current_frame.time - prev_kf.time
     # TODO option for stereo
+    median_parallax = compute_parallax(
+        fe, prev_kf.kfid; compensate_rotation=false, only_2d=false,
+    )
     cx = median_parallax ≥ fe.params.initial_parallax / 2.0 # TODO || stereo
     c0 = median_parallax ≥ fe.params.initial_parallax
     c1 = fe.current_frame.nb_3d_kpts < 0.75 * prev_kf.nb_3d_kpts
@@ -333,13 +338,21 @@ Steps:
 - Update current image with `image`.
 """
 function preprocess!(fe::FrontEnd, image)
-    # if track frame-to-frame
+    # TODO apply clahe to image
+
+    # Update previous if tracking from Frame to Frame
+    # and not from KeyFrame to Frame.
+    # TODO update this, when KF->F is ready.
     fe.previous_image = fe.current_image
-    # TODO apply clahe
+    fe.previous_pyramid = fe.current_pyramid
+
+    fe.current_pyramid = ImageTracking.LKPyramid(
+        image, fe.params.pyramid_levels,
+    )
     fe.current_image = image
 end
 
-function ktl_tracking!(fe::FrontEnd)
+function klt_tracking(fe::FrontEnd)
     @debug "[Front-End] KTL Tracking"
 
     priors = Point2f[]
@@ -351,8 +364,8 @@ function ktl_tracking!(fe::FrontEnd)
     prior_3d_pixels = Point2f[]
 
     # Select points to track.
-    for (_, kp) in fe.current_frame.keypoints
-        if !fe.params.use_prior || !kp.is_3d
+    for kp in values(fe.current_frame.keypoints)
+        if !(fe.params.use_prior && kp.is_3d)
             # Init prior with previous pixel positions.
             push!(priors, kp.pixel)
             push!(prior_pixels, kp.pixel)
@@ -378,8 +391,8 @@ function ktl_tracking!(fe::FrontEnd)
     if fe.params.use_prior && !isempty(priors_3d)
         # TODO allow passing displacement to tracking.
         # TODO construct displacement from priors_3d & prior_3d_pixels.
-        new_keypoints, status = fb_tracking(
-            fe.previous_image, fe.current_image, prior_3d_pixels;
+        new_keypoints, status = fb_tracking!(
+            fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
             pyramid_levels=1, window_size=fe.params.window_size,
             max_distance=fe.params.max_ktl_distance,
         )
@@ -410,8 +423,8 @@ function ktl_tracking!(fe::FrontEnd)
     # Track other prior keypoints, if any.
     isempty(priors) && return
 
-    new_keypoints, status = fb_tracking(
-        fe.previous_image, fe.current_image, prior_pixels;
+    new_keypoints, status = fb_tracking!(
+        fe.previous_pyramid, fe.current_pyramid, prior_pixels;
         pyramid_levels=fe.params.pyramid_levels,
         window_size=fe.params.window_size,
         max_distance=fe.params.max_ktl_distance,
@@ -428,3 +441,22 @@ function ktl_tracking!(fe::FrontEnd)
     end
     @debug "[Front End] Tracking no prior: $nb_good / $(length(priors))."
 end
+
+function reset_frame!(fe::FrontEnd)
+    for kpid in keys(fe.current_frame.keypoints)
+        remove_obs_from_current_frame!(fe.map_manager, kpid)
+    end
+    fe.current_frame.keypoints |> empty!
+    fe.current_frame.keypoints_grid .|> empty!
+
+    fe.current_frame.nb_2d_kpts = 0
+    fe.current_frame.nb_3d_kpts = 0
+    fe.current_frame.nb_keypoints = 0
+    fe.current_frame.nb_occupied_cells = 0
+end
+
+function reset!(fe::FrontEnd)
+    # TODO empty pyramids
+end
+
+# TODO klt_tracking_kf

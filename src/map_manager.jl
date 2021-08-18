@@ -35,30 +35,27 @@ function prepare_frame!(m::MapManager)
     #     # TODO
     # end
 
-    for keypoint in get_keypoints(m.current_frame)
-        # Get related MapPoint.
-        mp = get(m.map_points, keypoint.id, MapPoint(Val(:invalid)))
-        if !is_valid(mp)
-            remove_obs_from_current_frame!(m, keypoint.id)
-            continue
+    for kp in get_keypoints(m.current_frame)
+        if kp.id in keys(m.map_points)
+            # Link new Keyframe to the MapPoint.
+            mp = m.map_points[kp.id]
+            add_keyframe_observation!(mp, m.current_keyframe_id)
+        else
+            remove_obs_from_current_frame!(m, kp.id)
         end
-        # Link new Keyframe to the MapPoint.
-        add_keyframe_observation!(mp, m.current_keyframe_id)
     end
 end
 
 function extract_keypoints!(m::MapManager, image)
-    current_points = [kp.pixel for kp in values(m.current_frame.keypoints)]
-
     nb_2_detect = m.params.max_nb_keypoints - m.current_frame.nb_occupied_cells
     nb_2_detect ≤ 0 && return
     # Detect keypoints in the provided `image`
     # using current keypoints to set a mask of regions
     # to avoid detecting features in.
+    current_points = [kp.pixel for kp in values(m.current_frame.keypoints)]
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
 
-    # TODO describe keypoints & update mappoint descriptors.
     descriptors, keypoints = describe(m.extractor, image, keypoints)
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
 end
@@ -74,7 +71,6 @@ function add_keypoints_to_frame!(
 end
 
 function add_mappoint!(m::MapManager, descriptor)
-    # TODO add color to map point.
     new_mappoint = MapPoint(
         m.current_mappoint_id, m.current_keyframe_id, descriptor,
     )

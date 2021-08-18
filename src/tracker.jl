@@ -8,8 +8,8 @@ Perform Forward-Backward Lucas-Kanade optical flow tracking.
 
 # Returns:
 
-    `Tuple{Vector{SVector{2, Float64}}, Vector{Bool}}`.
-    New keypoints and their status.
+`Tuple{Vector{Point2f}, Vector{Bool}}`.
+New keypoints and their status.
 """
 function fb_tracking(
     previous_image, current_image, keypoints;
@@ -45,23 +45,23 @@ from the original keypoints to be consistent.
     to be considered the same keypoint.
 """
 function fb_tracking!(
-    new_keypoints::Vector{SVector{2, Float64}},
+    new_keypoints::Vector{Point2f},
     previous_pyramid::ImageTracking.LKPyramid,
     current_pyramid::ImageTracking.LKPyramid,
-    keypoints::Vector{SVector{2, Float64}},
+    keypoints::Vector{Point2f},
     algorithm::LucasKanade;
     max_distance::Real = 0.5,
 )
     isempty(keypoints) && return
 
     # Forward tracking.
-    flow = fill(SVector{2}(0.0, 0.0), length(keypoints))
+    flow = fill(Point2f(0.0, 0.0), length(keypoints))
     flow, status = ImageTracking.optflow!(
         previous_pyramid, current_pyramid, keypoints, flow, algorithm,
     )
 
-    valid_correspondences = Vector{SVector{2, Float64}}(undef, sum(status))
-    valid_ids = Dict{Int32, Int32}() # Mapping to the original points ids.
+    valid_correspondences = Vector{Point2f}(undef, sum(status))
+    valid_ids = Dict{Int, Int}() # Mapping to the original points ids.
 
     nb_good = 0
     for i in 1:length(status)
@@ -76,7 +76,7 @@ function fb_tracking!(
     end
 
     # Backward tracking.
-    back_flow = fill(SVector{2}(0.0, 0.0), length(valid_correspondences))
+    back_flow = fill(Point2f(0.0, 0.0), length(valid_correspondences))
     back_flow, back_status = ImageTracking.optflow!(
         current_pyramid, previous_pyramid, valid_correspondences,
         back_flow, algorithm,
@@ -91,4 +91,19 @@ function fb_tracking!(
     end
 
     new_keypoints, status
+end
+
+function fb_tracking!(
+    previous_pyramid::ImageTracking.LKPyramid,
+    current_pyramid::ImageTracking.LKPyramid,
+    keypoints::Vector{Point2f};
+    nb_iterations::Int = 30, window_size::Int = 11, pyramid_levels::Int = 3,
+    max_distance::Real = 0.5,
+)
+    new_keypoints = Vector{Point2f}(undef, length(keypoints))
+    algorithm = LucasKanade(nb_iterations; window_size, pyramid_levels)
+    fb_tracking!(
+        new_keypoints, previous_pyramid, current_pyramid,
+        keypoints, algorithm; max_distance,
+    )
 end

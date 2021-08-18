@@ -65,7 +65,6 @@ function detect(
         # Smooth out image, to avoid detecting features on the circle edges.
         σ ≉ 0 && (mask = imfilter(mask, Kernel.gaussian(σ));)
         image = image .* mask
-        save("./masked.png", image)
     end
 
     δ = e.max_points - length(current_points)

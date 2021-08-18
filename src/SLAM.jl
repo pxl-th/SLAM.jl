@@ -108,7 +108,7 @@ function run!(sm::SlamManager, image, time)
     @debug "[Slam Manager] Fid $(sm.current_frame.id), KFid $(sm.current_frame.kfid)"
 
     # Send image to the front end.
-    is_kf_required = track(sm.front_end, image, time)
+    is_kf_required = track!(sm.front_end, image, time)
 
     # TODO check for reset `params.reset_required`
 
@@ -128,7 +128,6 @@ function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
         in_image(frame.camera, kp.pixel) || continue
         color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
         draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
-        # image[kp.pixel |> to_cartesian] = RGB(1, 0, 0)
     end
 end
 
@@ -145,11 +144,25 @@ function main()
     )
     slam_manager = SlamManager(params, camera)
 
+    output_video = "/home/pxl-th/projects/slam.mp4"
     reader = VideoIO.openvideo("./data/4.hevc")
+    open_video_out(output_video, RGB{N0f8}, (height, width); framerate=25) do writer
+
+    time = 0.0
+    time_step = 1.0 / 25.0
     for (i, frame) in enumerate(reader)
         frame = frame .|> Gray{Float64}
-        run!(slam_manager, frame, i)
+
+        run!(slam_manager, frame, time)
+        time += time_step
+
+        vframe = frame |> copy .|> RGB{N0f8}
+        draw_keypoints!(vframe, slam_manager.front_end.current_frame)
+        write(writer, vframe)
+
         # i == 100 && break
+    end
+
     end
     reader |> close
 end
