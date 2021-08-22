@@ -29,9 +29,7 @@ function Camera(
         0.0, fy, 0.0,
         cx, cy, 1.0,
     )
-    @debug "[Camera] K $K"
     iK = K |> inv
-    @debug "[Camera] iK $iK"
 
     Camera(
         fx, fy, cx, cy,

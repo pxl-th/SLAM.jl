@@ -1,4 +1,7 @@
 module SLAM
+export SlamManager, Params, Camera, run!, to_cartesian
+export Visualizer, update_image!, update_axii!, expand_point_cloud!
+export add_camera_position!, update_frame!
 
 using LinearAlgebra
 using StaticArrays
@@ -6,11 +9,11 @@ using Images
 using ImageDraw
 using ImageFeatures
 using ImageTracking
-using VideoIO
 using Rotations
 using Manifolds
 using Parameters: @with_kw
 using DataStructures: OrderedSet
+using GLMakie
 
 using RecoverPose
 
@@ -67,6 +70,8 @@ include("map_point.jl")
 include("map_manager.jl")
 include("front_end.jl")
 include("mapper.jl")
+
+include("visualizer.jl")
 
 mutable struct SlamManager
     params::Params
@@ -139,42 +144,5 @@ function reset!(sm::SlamManager)
     sm.map_manager |> reset!
     @warn "[Slam Manager] Reset applied."
 end
-
-function main()
-    focal = 910
-    width, height = 1164, 874
-    cx, cy = width ÷ 2, height ÷ 2
-
-    params = Params()
-    camera = Camera(
-        focal, focal, cx, cy,
-        0, 0, 0, 0,
-        height, width,
-    )
-    slam_manager = SlamManager(params, camera)
-
-    output_video = "/home/pxl-th/projects/slam.mp4"
-    reader = VideoIO.openvideo("./data/4.hevc")
-    open_video_out(output_video, RGB{N0f8}, (height, width); framerate=25) do writer
-
-    time = 0.0
-    time_step = 1.0 / 25.0
-    for (i, frame) in enumerate(reader)
-        frame = frame .|> Gray{Float64}
-
-        run!(slam_manager, frame, time)
-        time += time_step
-
-        vframe = frame |> copy .|> RGB{N0f8}
-        draw_keypoints!(vframe, slam_manager.front_end.current_frame)
-        write(writer, vframe)
-
-        # i == 300 && break
-    end
-
-    end
-    reader |> close
-end
-# main()
 
 end

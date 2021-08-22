@@ -1,5 +1,4 @@
 using StaticArrays
-using GLMakie
 using LinearAlgebra
 using Printf
 using Images
@@ -19,6 +18,16 @@ function read_poses(poses_file)
     poses
 end
 
+function read_timestamps(timestamps_file)
+    timestamps = Float64[]
+    open(timestamps_file, "r") do reader
+        while !eof(reader)
+            push!(timestamps, parse(Float64, readline(reader)))
+        end
+    end
+    timestamps
+end
+
 # Convert XYZ to XZY.
 @inbounds to_makie(positions) = [Point3f0(p[1], p[3], p[2]) for p in positions]
 
@@ -36,19 +45,24 @@ struct KittyDataset
     Frames from the left camera.
     """
     frames_dir::String
+    """
+    Vector of timestamps for each frame.
+    """
+    timestamps::Vector{Float64}
 end
 
 function KittyDataset(base_dir::String, sequence::String)
     frames_dir = joinpath(base_dir, "sequences", sequence)
-    K = parse_matrix(
-        readline(joinpath(frames_dir, "calib.txt"))[5:end],
-    )[1:3, 1:3]
-    frames_dir = joinpath(frames_dir, "image_0")
 
+    K_raw = readline(joinpath(frames_dir, "calib.txt"))[5:end]
+    K = parse_matrix(K_raw)[1:3, 1:3]
+    timestamps = read_timestamps(joinpath(frames_dir, "times.txt"))
+
+    frames_dir = joinpath(frames_dir, "image_0")
     poses_file = joinpath(base_dir, "poses", sequence * ".txt")
     poses = read_poses(poses_file)
 
-    KittyDataset(K, poses, frames_dir)
+    KittyDataset(K, poses, frames_dir, timestamps)
 end
 
 function get_camera_poses(dataset::KittyDataset)
@@ -68,4 +82,15 @@ end
 Base.length(dataset::KittyDataset) = length(dataset.poses)
 function Base.getindex(dataset::KittyDataset, i)
     joinpath(dataset.frames_dir, @sprintf("%.06d.png", i - 1)) |> load
+end
+
+function Base.show(io::IO, d::KittyDataset)
+    cx, cy = d.K[2, 2:3]
+    height, width = ceil(Int, 2 * cy), ceil(Int, 2 * cx)
+
+    println(io, "Kitty Dataset:")
+    println(io, "- Number of frames: $(length(d))")
+    println(io, "- Frame resolution: $(height)x$(width) (height, width)")
+    println(io, "- Intrinsics:")
+    println(repr(MIME("text/plain"), d.K; context=io))
 end

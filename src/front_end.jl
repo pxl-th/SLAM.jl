@@ -28,6 +28,7 @@ end
 
 function track!(fe::FrontEnd, image, time)
     is_kf_required = track_mono!(fe, image, time)
+    display(fe.current_frame.wc); println()
     if is_kf_required
         create_keyframe!(fe.map_manager, image)
         fe.keyframe_pyramid = fe.current_pyramid
@@ -41,10 +42,8 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
     new_wc = fe.motion_model(fe.current_frame.wc, time)
-    @debug "[Front End] New wc"
-    # display(new_wc); println()
-
     set_wc!(fe.current_frame, new_wc)
+
     # track new image
     fe |> klt_tracking
     # TODO epipolar filtering
@@ -92,14 +91,10 @@ function compute_pose!(fe::FrontEnd)
         mp = fe.map_manager.map_points[kp.id]
         do_p3p && push!(p3p_pdn_positions, kp.position)
         # Convert pixel to `(x, y)` format, expected by P3P.
-        push!(p3p_pixels, Point2f(
-            kp.undistorted_pixel[2], kp.undistorted_pixel[1],
-        ))
+        push!(p3p_pixels, kp.undistorted_pixel[[2, 1]])
         push!(p3p_3d_points, mp.position)
         push!(p3p_kpids, kp.id)
     end
-
-    @debug "[Front-End] P3P N points: $(length(p3p_pixels))"
 
     # TODO if do_p3p
     n_inliers, (P, inliers, error) = p3p_ransac(
@@ -111,7 +106,6 @@ function compute_pose!(fe::FrontEnd)
         fe |> reset_frame!
         return
     end
-    @debug "[Front-End] P3P N inliers: $n_inliers"
     # Remove outliers after P3P.
     for (kpid, inlier) in zip(p3p_kpids, inliers)
         inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
@@ -120,9 +114,6 @@ function compute_pose!(fe::FrontEnd)
     P = fe.current_frame.camera.iK * P
     P = inv(SE3, to_4x4(P)) |> SMatrix{4, 4, Float64}
     set_wc!(fe.current_frame, P)
-
-    @debug "[Front-End] New wc after P3P"
-    # display(fe.current_frame.wc); println()
 
     # TODO motion-only BA + remove outliers again.
     fe.p3p_required = false
@@ -136,18 +127,14 @@ Additionally, compute Essential matrix using 5-point Ransac algorithm
 to filter out outliers and check if there is enough inliers to proceed.
 """
 function check_ready_for_init!(fe::FrontEnd)
-    # Get previous keyframe.
     fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
 
     avg_parallax = compute_parallax(
-        fe, fe.current_frame.kfid;
-        compensate_rotation=false,
+        fe, fe.current_frame.kfid; compensate_rotation=false,
         median_parallax=true,
     )
-    @debug "[Front-End] Init Avg Parallax: $avg_parallax"
     avg_parallax ≤ fe.params.initial_parallax && return false
 
-    previous_keyframe = fe.map_manager.frames_map[fe.current_frame.kfid]
     # Ensure there are enough keypoints for the essential matrix computation.
     if fe.current_frame.nb_keypoints < 8
         @debug "[Front-End] Not enough keypoints for initialization: " *
@@ -156,6 +143,7 @@ function check_ready_for_init!(fe::FrontEnd)
     end
 
     # Setup Essential matrix computation.
+    previous_keyframe = fe.map_manager.frames_map[fe.current_frame.kfid]
     R_compensation = get_Rcw(previous_keyframe) * get_Rwc(fe.current_frame)
 
     n_parallax = 0
@@ -193,35 +181,26 @@ function check_ready_for_init!(fe::FrontEnd)
             "to compute 5pt Essential Matrix."
         return false
     end
-    @debug "[Front-End] 5pt parallax $avg_parallax @ $n_parallax points."
-
     # Pass points in `(y, x)` format and camera intrinsics.
-    # TODO do something about multiple solutions returned by ransac.
     n_inliers, (E, P, inliers) = five_point_ransac(
         previous_points, current_points,
         fe.current_frame.camera.K, fe.current_frame.camera.K,
     )
-    # @assert length(E) == 1 "[Front-End] 5pt Ransac returned multiple solutions:\n" *
-    #     "\t- N inliers: $n_inliers \n" *
-    #     "\t- N solutions: $(length(E))"
     if n_inliers < 5
         @debug "[Front-End] Not enough inliers ($n_inliers) for the " *
             "5pt Essential Matrix."
         return false
     end
-
-    @debug "[Front-End] 5pt N inliers $n_inliers."
-    @debug "[Front-End] 5pt N solutions $(length(P))"
-
     # Remove outliers from the current frame.
     if n_inliers != n_parallax
-        for (i, inlier) in enumerate(inliers[1])
+        for (i, inlier) in enumerate(inliers)
             inlier && continue
             remove_obs_from_current_frame!(fe.map_manager, kp_ids[i])
         end
     end
-
-    set_wc!(fe.current_frame, inv(SE3, to_4x4(P[1])) |> SMatrix{4, 4})
+    # Invert, to make P: curr -> prev instead of prev -> curr.
+    P = inv(SE3, to_4x4(P)) |> SMatrix{4, 4}
+    set_wc!(fe.current_frame, P)
     true
 end
 
@@ -281,10 +260,8 @@ function compute_parallax(
     end
 
     frame = fe.map_manager.frames_map[current_frame_id]
-
-    current_rotation = SMatrix{3, 3, Float64}(I)
-    compensate_rotation &&
-        (current_rotation = get_Rcw(frame) * get_Rwc(fe.current_frame);)
+    current_rotation = compensate_rotation ?
+        get_Rcw(frame) * get_Rwc(fe.current_frame) : SMatrix{3, 3, Float64}(I)
 
     # Compute parallax.
     avg_parallax = 0.0
@@ -297,21 +274,18 @@ function compute_parallax(
         keypoint.id in keys(frame.keypoints) || continue
 
         # Compute parallax with undistorted pixel position.
-        undistorted_pixel = keypoint.undistorted_pixel
+        upx = keypoint.undistorted_pixel
         if compensate_rotation
-            undistorted_pixel = project(
-                frame.camera, current_rotation * keypoint.position,
-            )
+            upx = project(frame.camera, current_rotation * keypoint.position)
         end
 
         frame_keypoint = frame.keypoints[keypoint.id]
-        parallax = norm(undistorted_pixel - frame_keypoint.undistorted_pixel)
+        parallax = norm(upx - frame_keypoint.undistorted_pixel)
         avg_parallax += parallax
         n_parallax += 1
 
         median_parallax && push!(parallax_set, parallax)
     end
-
     n_parallax == 0 && return 0.0
 
     if median_parallax
@@ -346,7 +320,6 @@ function preprocess!(fe::FrontEnd, image)
 end
 
 function klt_tracking(fe::FrontEnd)
-    @debug "[Front-End] KTL Tracking"
     priors = Point2f[]
     prior_ids = Int64[]
     prior_pixels = Point2f[]
@@ -376,8 +349,6 @@ function klt_tracking(fe::FrontEnd)
         push!(prior_3d_pixels, kp.pixel)
         push!(prior_3d_ids, kp.id)
     end
-    @debug "[Front-End] N 3D Priors: $(length(priors_3d))"
-    @debug "[Front-End] N Priors: $(length(priors))"
 
     # First, track 3d keypoints, if using prior.
     if fe.params.use_prior && !isempty(priors_3d)
@@ -403,7 +374,6 @@ function klt_tracking(fe::FrontEnd)
                 push!(prior_ids, prior_3d_ids[i])
             end
         end
-        @debug "[Front End] Prior 3D tracking: $nb_good / $(length(priors_3d))."
         # If motion model is wrong, require P3P next,
         # without using any priors.
         if nb_good < 0.33 * length(priors_3d)
@@ -431,7 +401,6 @@ function klt_tracking(fe::FrontEnd)
             remove_obs_from_current_frame!(fe.map_manager, prior_ids[i])
         end
     end
-    @debug "[Front End] Tracking no prior: $nb_good / $(length(priors))."
 end
 
 function reset_frame!(fe::FrontEnd)

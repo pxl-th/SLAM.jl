@@ -33,11 +33,10 @@ function (m::MotionModel)(wc::SMatrix{4, 4, Float64}, time)
     m.prev_time < 0 && return wc
     # wc and m.prev_wc should be equal here,
     # since prev_wc is updated right after pose computation.
-    # If not, which can happen after Loop Closing, update to stay consistent.
+    # If not, which can happen after loop closure, update to stay consistent.
     δ = log_lie(SE3, wc * inv(SE3, m.prev_wc))
-    if isapprox.(δ, 0; atol=1e-5) |> all
-        m.prev_wc = wc
-    end
+    all(isapprox.(δ, 0; atol=1e-5)) || (m.prev_wc = wc;)
+
     δt = time - m.prev_time
     wc * exp_lie(SE3, m.log_rel_t .* δt)
 end

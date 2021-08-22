@@ -109,8 +109,6 @@ function add_keypoint!(
     descriptor::BitVector = BitVector(), is_3d::Bool = false,
 )
     undistorted_point = undistort_point(f.camera, point)
-    # Compute normalized 3d position of a point in `(x, y, z)` format.
-    # Note that `point` is in `(y, x)` format.
     position = backproject(f.camera, undistorted_point) |> normalize
     kp = Keypoint(id, point, undistorted_point, position, descriptor, is_3d)
     add_keypoint!(f, kp)

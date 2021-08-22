@@ -74,7 +74,10 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
     good = 0
     candidates = 0
     rel_kfid = -1
+    # frame -> observer key frame.
     rel_pose = SMatrix{4, 4, Float64}(I)
+    # observer key frame -> frame.
+    rel_pose_inv = SMatrix{4, 4, Float64}(I)
 
     # Go through all 2D keypoints in `frame`.
     for (i, kp) in enumerate(keypoints)
@@ -93,6 +96,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Don't recompute if the frame's ids don't change.
         if rel_kfid != kfid
             rel_pose = observer_kf.cw * frame.wc
+            rel_pose_inv = inv(SE3, rel_pose)
             rel_kfid = kfid
         end
         # Get observer keypoint.
@@ -102,13 +106,13 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         parallax = norm(observer_kp.undistorted_pixel .- rot_px)
         candidates += 1
         # Compute 3D pose and check if it is good.
-        # Note, that we invert relative pose in triangulation.
+        # Note, that we use inverted relative pose.
         left_point = RecoverPose.triangulate_point(
-            observer_kp.position, kp.position, P1, inv(SE3, rel_pose),
+            observer_kp.position, kp.position, P1, rel_pose_inv,
         )
         left_point *= 1.0 / left_point[4]
         # Project into the right camera (new KeyFrame).
-        right_point = inv(SE3, rel_pose) * left_point
+        right_point = rel_pose_inv * left_point
 
         # Ensure that 3D point is in front of the both cameras.
         if left_point[3] < 0.1 || right_point[3] < 0.1
@@ -120,6 +124,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Remove MapPoint with high reprojection error.
         left_projection = project(observer_kf.camera, left_point)
         right_projection = project(frame.camera, right_point)
+        # TODO use undistorted?
         left_error = norm(left_projection - observer_kp.undistorted_pixel)
         right_error = norm(right_projection - kp.undistorted_pixel)
 
