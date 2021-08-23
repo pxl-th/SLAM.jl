@@ -18,7 +18,7 @@
     Size of the window for the KTL tracking.
     Actual size is `2 * S + 1`.
     """
-    window_size::Int = 21
+    window_size::Int = 9
     """
     Use prior motion model to estimate subsequent position of keypoints
     in the next frame.
