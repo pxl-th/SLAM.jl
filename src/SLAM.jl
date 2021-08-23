@@ -117,7 +117,7 @@ function run!(sm::SlamManager, image, time)
 
     # Send image to the front end.
     is_kf_required = track!(sm.front_end, image, time)
-    sm.params.reset_required && reset!(sm)
+    sm.params.reset_required && (reset!(sm); return)
     # Create new KeyFrame if needed.
     # Send it to the mapper queue for traingulation.
     is_kf_required || return

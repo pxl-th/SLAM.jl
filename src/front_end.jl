@@ -49,6 +49,7 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
     # TODO epipolar filtering
     if !fe.params.vision_initialized
         if fe.current_frame.nb_keypoints < 50
+            @warn "[Front End] NB KP < 50. Reset required."
             fe.params.reset_required = true
             return false
         elseif check_ready_for_init!(fe)
@@ -89,7 +90,8 @@ function compute_pose!(fe::FrontEnd)
         kp.id in keys(fe.map_manager.map_points) || continue
 
         mp = fe.map_manager.map_points[kp.id]
-        do_p3p && push!(p3p_pdn_positions, kp.position)
+        # TODO do_p3p &&
+        push!(p3p_pdn_positions, normalize(kp.position))
         # Convert pixel to `(x, y)` format, expected by P3P.
         push!(p3p_pixels, kp.undistorted_pixel[[2, 1]])
         push!(p3p_3d_points, mp.position)
@@ -97,23 +99,23 @@ function compute_pose!(fe::FrontEnd)
     end
 
     # TODO if do_p3p
-    n_inliers, (P, inliers, error) = p3p_ransac(
-        p3p_3d_points, p3p_pixels, p3p_pdn_positions, fe.current_frame.camera.K;
-        threshold=fe.params.max_reprojection_error,
+    n_inliers, model = p3p_ransac(
+        p3p_3d_points, p3p_pixels, p3p_pdn_positions,
+        fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
     )
-    if n_inliers < 5
-        @debug "[Front-End] Not enough inliers for reliable P3P pose estimation."
+    if n_inliers < 5 || model ≡ nothing
+        @warn "[Front-End] Not enough inliers for reliable P3P pose estimation."
         fe |> reset_frame!
         return
     end
+    P, inliers, error = model
     # Remove outliers after P3P.
     for (kpid, inlier) in zip(p3p_kpids, inliers)
         inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
     end
     # Resulting projection is in `K * [R|t]` format, remove K part.
-    P = fe.current_frame.camera.iK * P
-    P = inv(SE3, to_4x4(P)) |> SMatrix{4, 4, Float64}
-    set_wc!(fe.current_frame, P)
+    P = inv(SE3, to_4x4(fe.current_frame.camera.iK * P))
+    set_wc!(fe.current_frame, SMatrix{4, 4, Float64}(P))
 
     # TODO motion-only BA + remove outliers again.
     fe.p3p_required = false
@@ -223,7 +225,7 @@ function check_new_kf_required(fe::FrontEnd)::Bool
     time_δ = fe.current_frame.time - prev_kf.time
     # TODO option for stereo
     median_parallax = compute_parallax(
-        fe, prev_kf.kfid; compensate_rotation=false, only_2d=false,
+        fe, prev_kf.kfid; compensate_rotation=true, only_2d=false,
     )
     cx = median_parallax ≥ fe.params.initial_parallax / 2.0 # TODO || stereo
     c0 = median_parallax ≥ fe.params.initial_parallax

@@ -46,7 +46,7 @@
     Maximum allowed reprojection error.
     Used during triangulation in Mapper to discard outliers.
     """
-    max_reprojection_error = 3.0
+    max_reprojection_error::Real = 3.0
     """
     Whether to do P3P for pose estimation
     or doing only Bundle Adjustment for pose.

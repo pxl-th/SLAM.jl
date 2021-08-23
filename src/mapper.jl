@@ -81,15 +81,17 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
 
     # Go through all 2D keypoints in `frame`.
     for (i, kp) in enumerate(keypoints)
-        # TODO removeMapPointsObs if not in map
-        kp.id in keys(mapper.map_manager.map_points) || continue
+        # Remove mappoints observation if not in map.
+        kp.id in keys(mapper.map_manager.map_points) || (
+            remove_mappoint_obs!(mapper.map_manager, kp.id, frame.kfid);
+            continue;
+        )
         map_point = mapper.map_manager.map_points[kp.id]
         map_point.is_3d && continue
-
+        # Get first KeyFrame id from the set of mappoint observers.
         length(map_point.observer_keyframes_ids) < 2 && continue
         kfid = map_point.observer_keyframes_ids[1]
         frame.kfid == kfid && continue
-
         # Get 1st KeyFrame observation for the MapPoint.
         observer_kf = mapper.map_manager.frames_map[kfid]
         # Compute relative motion between new KF & observer KF.
@@ -102,6 +104,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Get observer keypoint.
         kp.id in keys(observer_kf.keypoints) || continue
         observer_kp = observer_kf.keypoints[kp.id]
+
         rot_px = project(frame.camera, rel_pose[1:3, 1:3] * kp.position)
         parallax = norm(observer_kp.undistorted_pixel .- rot_px)
         candidates += 1
@@ -124,10 +127,8 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Remove MapPoint with high reprojection error.
         left_projection = project(observer_kf.camera, left_point)
         right_projection = project(frame.camera, right_point)
-        # TODO use undistorted?
         left_error = norm(left_projection - observer_kp.undistorted_pixel)
         right_error = norm(right_projection - kp.undistorted_pixel)
-
         if left_error > mapper.params.max_reprojection_error ||
             right_error > mapper.params.max_reprojection_error
             parallax > 20 && remove_mappoint_obs!(

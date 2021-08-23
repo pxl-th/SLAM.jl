@@ -9,7 +9,7 @@ mutable struct Keypoint
     pixel::Point2f
     undistorted_pixel::Point2f
     """
-    Position of a keypoint in 3D space in `(x, y, z)` format. Normalized.
+    Position of a keypoint in 3D space in `(x, y, z = 1)` format.
     """
     position::Point3f
 
@@ -82,7 +82,6 @@ function Frame(;
 
     image_resolution = (camera.height, camera.width)
     cells = ceil.(Int64, image_resolution ./ cell_size)
-    @debug "[Frame] Grid resolution: $cells"
     grid = [Set{Int64}() for _=1:cells[1], _=1:cells[2]]
 
     Frame(
@@ -109,7 +108,7 @@ function add_keypoint!(
     descriptor::BitVector = BitVector(), is_3d::Bool = false,
 )
     undistorted_point = undistort_point(f.camera, point)
-    position = backproject(f.camera, undistorted_point) |> normalize
+    position = backproject(f.camera, undistorted_point)
     kp = Keypoint(id, point, undistorted_point, position, descriptor, is_3d)
     add_keypoint!(f, kp)
 end
@@ -138,7 +137,7 @@ function update_keypoint!(f::Frame, id::Int64, point)
     kp = ckp |> deepcopy
     kp.pixel = point
     kp.undistorted_pixel = undistort_point(f.camera, kp.pixel)
-    kp.position = backproject(f.camera, kp.undistorted_pixel) |> normalize
+    kp.position = backproject(f.camera, kp.undistorted_pixel)
 
     update_keypoint_in_grid!(f, ckp, kp)
     f.keypoints[id] = kp

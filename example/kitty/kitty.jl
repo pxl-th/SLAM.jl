@@ -85,12 +85,8 @@ function Base.getindex(dataset::KittyDataset, i)
 end
 
 function Base.show(io::IO, d::KittyDataset)
-    cx, cy = d.K[2, 2:3]
-    height, width = ceil(Int, 2 * cy), ceil(Int, 2 * cx)
-
     println(io, "Kitty Dataset:")
     println(io, "- Number of frames: $(length(d))")
-    println(io, "- Frame resolution: $(height)x$(width) (height, width)")
     println(io, "- Intrinsics:")
     println(repr(MIME("text/plain"), d.K; context=io))
 end
