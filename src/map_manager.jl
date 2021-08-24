@@ -21,7 +21,7 @@ MapManager(params::Params, frame::Frame, extractor::Extractor) = MapManager(
 )
 
 function create_keyframe!(m::MapManager, image)
-    @debug "[Map Manager] Creating new keyframe."
+    @debug "[Map Manager] Creating new keyframe $(m.current_keyframe_id)."
     prepare_frame!(m)
     extract_keypoints!(m, image)
     add_keyframe!(m)
@@ -35,26 +35,37 @@ function prepare_frame!(m::MapManager)
     #     # TODO
     # end
 
-    for kp in get_keypoints(m.current_frame)
+    n_added = 0
+    n_removed = 0
+    for kp in values(m.current_frame.keypoints)
         if kp.id in keys(m.map_points)
             # Link new Keyframe to the MapPoint.
             mp = m.map_points[kp.id]
             add_keyframe_observation!(mp, m.current_keyframe_id)
+            n_added += 1
         else
             remove_obs_from_current_frame!(m, kp.id)
+            n_removed += 1
         end
     end
+    @debug "[MM] Added total KF observs $n_added"
+    @debug "[MM] Removed total KF observs $n_removed"
 end
 
 function extract_keypoints!(m::MapManager, image)
     nb_2_detect = m.params.max_nb_keypoints - m.current_frame.nb_occupied_cells
-    nb_2_detect ≤ 0 && return
+    if nb_2_detect ≤ 0
+        @debug "[MM] No need to extract more KPs"
+        return
+    end
     # Detect keypoints in the provided `image`
     # using current keypoints to set a mask of regions
     # to avoid detecting features in.
     current_points = [kp.pixel for kp in values(m.current_frame.keypoints)]
+    @debug "[MM] Before extraction $(length(current_points)) keypoints"
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
+    @debug "[MM] Extracted $(length(keypoints)) keypoints"
 
     descriptors, keypoints = describe(m.extractor, image, keypoints)
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
@@ -85,6 +96,8 @@ Increase current keyframe id & total number of keyframes.
 """
 function add_keyframe!(m::MapManager)
     m.frames_map[m.current_keyframe_id] = m.current_frame |> deepcopy
+    # @debug "[MapManager] Copying current frame $(m.current_keyframe_id)"
+    # m.frames_map[m.current_keyframe_id] = m.current_frame |> copy
     m.current_keyframe_id += 1
     m.nb_keyframes += 1
 end
@@ -138,7 +151,12 @@ function update_mappoint!(m::MapManager, kpid::Int, new_position, inv_depth)
                 remove_kf_observation!(mp, observer_id)
             end
         end
-        mp.is_observed && turn_keypoint_3d!(m.current_frame, kpid)
+        if mp.is_observed
+            # Because we deepcopy frame before putting it to the frames_map,
+            # we need to update current frame as well.
+            # Which should also update current frame in the FrontEnd.
+            turn_keypoint_3d!(m.current_frame, kpid)
+        end
     end
     # Update world position.
     set_position!(mp, new_position, inv_depth ≥ 0 ? inv_depth : -1)

@@ -29,6 +29,7 @@ end
 function track!(fe::FrontEnd, image, time)
     is_kf_required = track_mono!(fe, image, time)
     display(fe.current_frame.wc); println()
+
     if is_kf_required
         create_keyframe!(fe.map_manager, image)
         fe.keyframe_pyramid = fe.current_pyramid
@@ -71,10 +72,13 @@ end
 Compute pose of a current Frame using P3P Ransac algorithm.
 """
 function compute_pose!(fe::FrontEnd)
-    if fe.current_frame.nb_3d_kpts < 4
-        @debug "[Front-End] Not enough 3D keypoints to compute P3P."
+    if fe.current_frame.nb_3d_kpts < 5
+        n3d = length([m for m in values(fe.current_frame.keypoints) if m.is_3d])
+        @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts) but $n3d."
         return
     end
+    n3d = length([m for m in values(fe.current_frame.keypoints) if m.is_3d])
+    @debug "[Front-End] Enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts) but $n3d."
 
     # TODO for now we always do p3p, since there is no BA.
     # do_p3p = fe.p3p_required || fe.params.do_p3p
@@ -108,6 +112,7 @@ function compute_pose!(fe::FrontEnd)
         fe |> reset_frame!
         return
     end
+    @debug "[FE] P3P $(n_inliers)/$(length(p3p_pixels)) inliers"
     P, inliers, error = model
     # Remove outliers after P3P.
     for (kpid, inlier) in zip(p3p_kpids, inliers)
@@ -159,9 +164,10 @@ function check_ready_for_init!(fe::FrontEnd)
     for keypoint in values(fe.current_frame.keypoints)
         keypoint.id in keys(previous_keyframe.keypoints) || continue
 
+        # Convert points to `(x, y)` format as expected by five points.
         pkf_keypoint = previous_keyframe.keypoints[keypoint.id]
-        push!(previous_points, pkf_keypoint.undistorted_pixel)
-        push!(current_points, keypoint.undistorted_pixel)
+        push!(previous_points, pkf_keypoint.undistorted_pixel[[2, 1]])
+        push!(current_points, keypoint.undistorted_pixel[[2, 1]])
         push!(kp_ids, keypoint.id)
 
         # Compute rotation-compensated parallax.
@@ -183,7 +189,6 @@ function check_ready_for_init!(fe::FrontEnd)
             "to compute 5pt Essential Matrix."
         return false
     end
-    # Pass points in `(y, x)` format and camera intrinsics.
     n_inliers, (E, P, inliers) = five_point_ransac(
         previous_points, current_points,
         fe.current_frame.camera.K, fe.current_frame.camera.K,
@@ -201,7 +206,9 @@ function check_ready_for_init!(fe::FrontEnd)
         end
     end
     # Invert, to make P: curr -> prev instead of prev -> curr.
-    P = inv(SE3, to_4x4(P)) |> SMatrix{4, 4}
+    @info "FIVAD"
+    display(P); println()
+    P = inv(SE3, to_4x4(P)) |> SMatrix{4, 4, Float64}
     set_wc!(fe.current_frame, P)
     true
 end
@@ -215,6 +222,7 @@ function check_new_kf_required(fe::FrontEnd)::Bool
 
     # Id difference since last KeyFrame.
     frames_δ = fe.current_frame.id - prev_kf.id
+    @debug "[FE] Check new KF $(fe.current_frame.nb_3d_kpts) 3dkp, δ $frames_δ"
     fe.current_frame.nb_occupied_cells < 0.33 * fe.params.max_nb_keypoints &&
         frames_δ ≥ 5 && return true # TODO && !params.localba_is_on
     fe.current_frame.nb_3d_kpts < 20 && frames_δ ≥ 2 && return true
@@ -403,6 +411,7 @@ function klt_tracking(fe::FrontEnd)
             remove_obs_from_current_frame!(fe.map_manager, prior_ids[i])
         end
     end
+    @debug "[FE] KLT $(nb_good)/$(length(new_keypoints)) inliers"
 end
 
 function reset_frame!(fe::FrontEnd)

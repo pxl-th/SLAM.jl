@@ -33,12 +33,14 @@ function run!(mapper::Mapper)
         @debug "[Mapper] Temporal triangulation. Before triangulation:"
         @debug "\t- 2d kpts: $(new_keyframe.nb_2d_kpts)"
         @debug "\t- 3d kpts: $(new_keyframe.nb_3d_kpts)"
+        @debug "\t- curr 3d kpts: $(mapper.current_frame.nb_3d_kpts)"
 
         triangulate_temporal!(mapper, new_keyframe)
 
         @debug "[Mapper] After triangulation:"
         @debug "\t- 2d kpts: $(new_keyframe.nb_2d_kpts)"
         @debug "\t- 3d kpts: $(new_keyframe.nb_3d_kpts)"
+        @debug "\t- curr 3d kpts: $(mapper.current_frame.nb_3d_kpts)"
     end
 
     # Check if reset is required (for mono mode).
@@ -69,7 +71,8 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         @debug "[Mapper] No 2D keypoints to triangulate."
         return
     end
-    P1 = SMatrix{3, 4, Float64}(I)
+    K = to_4x4(frame.camera.K)
+    P1 = K * SMatrix{4, 4, Float64}(I)
 
     good = 0
     candidates = 0
@@ -79,19 +82,32 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
     # observer key frame -> frame.
     rel_pose_inv = SMatrix{4, 4, Float64}(I)
 
+    max_error = mapper.params.max_reprojection_error
+    cam = frame.camera
+
     # Go through all 2D keypoints in `frame`.
     for (i, kp) in enumerate(keypoints)
         # Remove mappoints observation if not in map.
-        kp.id in keys(mapper.map_manager.map_points) || (
-            remove_mappoint_obs!(mapper.map_manager, kp.id, frame.kfid);
-            continue;
-        )
+        if !(kp.id in keys(mapper.map_manager.map_points))
+            remove_mappoint_obs!(mapper.map_manager, kp.id, frame.kfid)
+            @debug "[MP] No MapPoint for KP" maxlog=10
+            continue
+        end
         map_point = mapper.map_manager.map_points[kp.id]
-        map_point.is_3d && continue
+        if map_point.is_3d
+            @debug "[MP] Already 3d" maxlog=10
+            continue
+        end
         # Get first KeyFrame id from the set of mappoint observers.
-        length(map_point.observer_keyframes_ids) < 2 && continue
+        if length(map_point.observer_keyframes_ids) < 2
+            @debug "[MP] Not enough observers @ $(frame.kfid): $(map_point.observer_keyframes_ids)" maxlog=10
+            continue
+        end
         kfid = map_point.observer_keyframes_ids[1]
-        frame.kfid == kfid && continue
+        if frame.kfid == kfid
+            @debug "[MP] Observer is the same as Frame" maxlog=10
+            continue
+        end
         # Get 1st KeyFrame observation for the MapPoint.
         observer_kf = mapper.map_manager.frames_map[kfid]
         # Compute relative motion between new KF & observer KF.
@@ -102,38 +118,43 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
             rel_kfid = kfid
         end
         # Get observer keypoint.
-        kp.id in keys(observer_kf.keypoints) || continue
+        if !(kp.id in keys(observer_kf.keypoints))
+            @debug "[MP] Observer has no such KP" maxlog=10
+            continue
+        end
         observer_kp = observer_kf.keypoints[kp.id]
 
-        rot_px = project(frame.camera, rel_pose[1:3, 1:3] * kp.position)
-        parallax = norm(observer_kp.undistorted_pixel .- rot_px)
+        obup = observer_kp.undistorted_pixel
+        kpup = kp.undistorted_pixel
+
+        parallax = norm(obup .- project(cam, rel_pose[1:3, 1:3] * kp.position))
         candidates += 1
         # Compute 3D pose and check if it is good.
         # Note, that we use inverted relative pose.
-        left_point = RecoverPose.triangulate_point(
-            observer_kp.position, kp.position, P1, rel_pose_inv,
+        left_point = iterative_triangulation(
+            observer_kp.undistorted_pixel[[2, 1]], kp.undistorted_pixel[[2, 1]],
+            P1, K * rel_pose_inv,
         )
         left_point *= 1.0 / left_point[4]
         # Project into the right camera (new KeyFrame).
         right_point = rel_pose_inv * left_point
 
         # Ensure that 3D point is in front of the both cameras.
-        if left_point[3] < 0.1 || right_point[3] < 0.1
+        if left_point[3] < 0 || right_point[3] < 0
             parallax > 20 && remove_mappoint_obs!(
                 mapper.map_manager, observer_kp.id, frame.kfid,
             )
+            @debug "[MP] Triangulation is behind cameras." maxlog=10
             continue
         end
         # Remove MapPoint with high reprojection error.
-        left_projection = project(observer_kf.camera, left_point)
-        right_projection = project(frame.camera, right_point)
-        left_error = norm(left_projection - observer_kp.undistorted_pixel)
-        right_error = norm(right_projection - kp.undistorted_pixel)
-        if left_error > mapper.params.max_reprojection_error ||
-            right_error > mapper.params.max_reprojection_error
+        lrepr = norm(project(cam, left_point[1:3]) .- obup)
+        rrepr = norm(project(cam, right_point[1:3]) .- kpup)
+        if lrepr > max_error || rrepr > max_error
             parallax > 20 && remove_mappoint_obs!(
                 mapper.map_manager, observer_kp.id, frame.kfid,
             )
+            @debug "[MP] Triangulation has too big repr error $lrepr, $rrepr" maxlog=10
             continue
         end
         # 3D pose is good, update MapPoint and related Frames.
@@ -142,6 +163,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         good += 1
     end
     @debug "[Mapper] Temporal triangulation: $good/$candidates good KeyPoints."
+    # @assert good > 0
 end
 
 function get_new_kf!(mapper::Mapper)::Tuple{Bool, Union{Nothing, KeyFrame}}

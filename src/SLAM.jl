@@ -57,20 +57,13 @@ end
 include("camera.jl")
 include("extractor.jl")
 include("tracker.jl")
-
-function extract_fast(image, n_keypoints::Int64, threshold::Float64 = 0.4)
-    fastcorners(image, n_keypoints, threshold) |> Keypoints
-end
-
 include("params.jl")
 include("frame.jl")
-
 include("motion_model.jl")
 include("map_point.jl")
 include("map_manager.jl")
 include("front_end.jl")
 include("mapper.jl")
-
 include("visualizer.jl")
 
 mutable struct SlamManager
@@ -91,9 +84,14 @@ end
 
 function SlamManager(params::Params, camera::Camera)
     avoidance_radius = max(5, params.max_distance ÷ 2)
+    image_resolution = (camera.height, camera.width)
+    grid_resolution = ceil.(Int64, image_resolution ./ params.max_distance)
 
-    frame = Frame(;camera=camera, cell_size=params.max_distance)
-    extractor = Extractor(params.max_nb_keypoints, avoidance_radius)
+    frame = Frame(;camera, cell_size=params.max_distance)
+    extractor = Extractor(
+        params.max_nb_keypoints, avoidance_radius,
+        grid_resolution, params.max_distance,
+    )
     map_manager = MapManager(params, frame, extractor)
     front_end = FrontEnd(params, frame, map_manager)
     mapper = Mapper(params, map_manager, frame)
@@ -128,11 +126,14 @@ end
 
 function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
     radius = 2
+    n_outside = 0
     for kp in values(frame.keypoints)
-        in_image(frame.camera, kp.pixel) || continue
+        in_image(frame.camera, kp.pixel) || (n_outside += 1; continue;)
         color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
         draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
     end
+    @debug "[SM] N outside $(n_outside)/$(length(frame.keypoints))"
+    image
 end
 
 function reset!(sm::SlamManager)

@@ -7,7 +7,7 @@
     """
     Maximum distance a point can shift to be considered inlier in KTL tracking.
     """
-    max_ktl_distance::Real = 0.5
+    max_ktl_distance::Real = 1.0
     """
     Number of pyramid levels to construct.
     0 to use original image only.
@@ -18,7 +18,7 @@
     Size of the window for the KTL tracking.
     Actual size is `2 * S + 1`.
     """
-    window_size::Int = 9
+    window_size::Int = 31
     """
     Use prior motion model to estimate subsequent position of keypoints
     in the next frame.

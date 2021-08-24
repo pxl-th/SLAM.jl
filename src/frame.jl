@@ -94,6 +94,17 @@ function Frame(;
     )
 end
 
+# function Base.copy(f::Frame)
+#     Frame(
+#         f.id, f.kfid, f.time,
+#         f.cw, f.wc, f.camera,
+#         copy(f.keypoints), copy(f.keypoints_grid),
+#         f.nb_occupied_cells, f.cell_size,
+#         f.nb_keypoints, f.nb_2d_kpts, f.nb_3d_kpts,
+#         copy(f.covisible_kf),
+#     )
+# end
+
 get_keypoints(f::Frame) = f.keypoints |> values
 function get_2d_keypoints(f::Frame)
     keypoints = Keypoint[]
@@ -157,7 +168,7 @@ end
 
 function add_keypoint_to_grid!(f::Frame, keypoint::Keypoint)
     kpi = to_cartesian(keypoint.pixel, f.cell_size)
-    isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells += 1)
+    isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells += 1;)
     push!(f.keypoints_grid[kpi], keypoint.id)
 end
 

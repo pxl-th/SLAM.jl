@@ -50,7 +50,7 @@ function update!(m::MotionModel, wc::SMatrix{4, 4, Float64}, time)
 
     δt = time - m.prev_time
     m.prev_time = time
-    (δt < 0 || δt ≈ 0) && error(
+    δt < 0 && error(
         "Got older than previous image! " *
         "Previous time $(m.prev_time) vs time $time."
     )
