@@ -67,8 +67,8 @@ function Visualizer(image_resolution)
 
     trim!(figure.layout)
 
-    colsize!(top_grid, 1, Relative(3 / 4))
-    colsize!(top_grid, 2, Relative(1 / 4))
+    colsize!(top_grid, 1, Relative(1 / 2))
+    colsize!(top_grid, 2, Relative(1 / 2))
     colsize!(bottom_grid, 1, Relative(1 / 2))
     colsize!(bottom_grid, 2, Relative(1 / 2))
 

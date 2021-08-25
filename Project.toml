@@ -4,9 +4,11 @@ authors = ["Anton Smirnov <anton.smn@protonmail.com>"]
 version = "0.1.0"
 
 [deps]
+BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 ImageDraw = "4381153b-2b60-58ae-a1ba-fd683676385f"
 ImageFeatures = "92ff4b2b-8094-53d3-b29d-97f740f06cef"
 ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
