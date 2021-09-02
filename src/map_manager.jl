@@ -162,6 +162,63 @@ function update_mappoint!(m::MapManager, kpid::Int, new_position, inv_depth)
     set_position!(mp, new_position, inv_depth ≥ 0 ? inv_depth : -1)
 end
 
+"""
+Update MapPoints and covisible graph between KeyFrames.
+"""
+function update_frame_covisibility!(m::MapManager, frame::Frame)
+    covisible_keyframes = Dict{Int64, Int64}()
+    local_map_ids = Set{Int64}()
+    # For each Keypoint in the `frame`, get its corresponding MapPoint.
+    # Get the set of KeyFrames that observe this MapPoint.
+    # Add them to the covisible map, which contains all KeyFrames
+    # that share visibility with the `frame`.
+    for kp in get_keypoints(frame)
+        if !(kp.id in keys(m.map_points))
+            remove_mappoint_obs!(m, kp.id, frame.kfid)
+            remove_obs_from_current_frame!(m, kp.id)
+            continue
+        end
+        mp = m.map_points[kp.id]
+        # Get the set of KeyFrames observing this KeyFrame to update covisibility.
+        for kfid in mp.observer_keyframes_ids
+            kfid == frame.kfid && continue
+            if kfid in keys(covisible_keyframes)
+                covisible_keyframes[kfid] += 1
+            else
+                covisible_keyframes[kfid] = 1
+            end
+        end
+    end
+    # Update covisibility for covisible KeyFrames.
+    # For each entry in the covisible map, get its corresponding KeyFrame.
+    # Update the covisible score for the `frame` in it.
+    # Add all 3D Keypoints that are not in the `frame`
+    # to the local map for future tracking.
+    bad_kfids = Set{Int64}()
+    for (kfid, cov_score) in covisible_keyframes
+        if !(kfid in keys(m.frames_map))
+            push!(bad_kfids, kfid)
+            continue
+        end
+        cov_frame = m.frames_map[kfid]
+        cov_frame.covisible_kf[frame.kfid] = cov_score
+        for kp in get_3d_keypoints(cov_frame)
+            kp.id in keys(frame.keypoints) || push!(local_map_ids, kp.id)
+        end
+    end
+    for bad_kfid in bad_kfids
+        pop!(covisible_keyframes, bad_kfid)
+    end
+    # Update the set of covisible KeyFrames.
+    frame.covisible_kf = covisible_keyframes
+    # Update local map of unobserved MapPoints.
+    if length(local_map_ids) > 0.5 * length(frame.local_map_ids)
+        frame.local_map_ids = local_map_ids
+    else
+        union!(frame.local_map_ids, local_map_ids)
+    end
+end
+
 function reset!(m::MapManager)
     m.nb_keyframes = 0
     m.nb_mappoints = 0

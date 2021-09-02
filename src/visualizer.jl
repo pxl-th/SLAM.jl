@@ -36,7 +36,8 @@ function Visualizer(image_resolution)
 
     camera_dir_element = MarkerElement(;color=:red, marker="→")
     keypoint_element = MarkerElement(;color=:green, marker="⬤")
-    mappoint_element = MarkerElement(;color=:blue, marker="⬤")
+    mappoint_element_image = MarkerElement(;color=:blue, marker="⬤")
+    mappoint_element = MarkerElement(;color=:gray, marker="⬤")
 
     Legend(
         bottom_grid[1, 1],
@@ -46,7 +47,7 @@ function Visualizer(image_resolution)
     )
     Legend(
         bottom_grid[1, 2],
-        [keypoint_element, mappoint_element],
+        [keypoint_element, mappoint_element_image],
         ["2D Keypoint", "Triangulated Keypoint (Mappoint)"];
         orientation=:horizontal, tellheight=true,
     )

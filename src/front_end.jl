@@ -103,6 +103,7 @@ function compute_pose!(fe::FrontEnd)
     end
 
     # TODO if do_p3p
+    # P3P computes world->camera projection.
     n_inliers, model = p3p_ransac(
         p3p_3d_points, p3p_pixels, p3p_pdn_positions,
         fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
@@ -113,16 +114,26 @@ function compute_pose!(fe::FrontEnd)
         return
     end
     @debug "[FE] P3P $(n_inliers)/$(length(p3p_pixels)) inliers"
-    P, inliers, error = model
+    KP, inliers, error = model
+    P = to_4x4(fe.current_frame.camera.iK * KP)
     # Remove outliers after P3P.
     for (kpid, inlier) in zip(p3p_kpids, inliers)
         inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
     end
-    # Resulting projection is in `K * [R|t]` format, remove K part.
-    P = inv(SE3, to_4x4(fe.current_frame.camera.iK * P))
-    set_wc!(fe.current_frame, SMatrix{4, 4, Float64}(P))
+    # Resulting projection is in `K * [R|t]` form, remove K part.
+    set_cw!(fe.current_frame, P)
 
-    # TODO motion-only BA + remove outliers again.
+    ba_pixels = [
+        Point2f(p[2], p[1]) for (inlier, p) in zip(inliers, p3p_pixels)
+        if inlier
+    ]
+    new_T, ba_init_error, ba_res_error = pnp_bundle_adjustment(
+        fe.current_frame.camera, fe.current_frame.cw,
+        ba_pixels, p3p_3d_points[inliers]; iterations=5,
+    )
+    if ba_res_error < ba_init_error
+        set_cw!(fe.current_frame, new_T)
+    end
     fe.p3p_required = false
 end
 
@@ -189,7 +200,7 @@ function check_ready_for_init!(fe::FrontEnd)
             "to compute 5pt Essential Matrix."
         return false
     end
-    n_inliers, (E, P, inliers) = five_point_ransac(
+    n_inliers, (E, P, inliers, repr_error) = five_point_ransac(
         previous_points, current_points,
         fe.current_frame.camera.K, fe.current_frame.camera.K,
     )

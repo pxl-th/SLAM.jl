@@ -57,12 +57,12 @@ function run!(mapper::Mapper)
             return
         end
     end
-
     # Update the map points and the covisibility graph between KeyFrames.
-    # TODO update_frame_covisibility(mapper.map_manager, new_keyframe)
+    update_frame_covisibility!(mapper.map_manager, new_keyframe)
 
     # TODO match to local map
     # TODO send new KF to estimator for bundle adjustment
+    # TODO send new KF to loop closer
 end
 
 function triangulate_temporal!(mapper::Mapper, frame::Frame)

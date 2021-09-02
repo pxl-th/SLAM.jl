@@ -116,9 +116,11 @@ end
 Transform point from 2D to 3D by dividing by `K`.
 
 # Arguments:
+
 - `point::Point2`: Point to backproject in `(y, x)` format.
 
 # Returns:
+
 Backprojected `Point3f` in `(x, y, z = 1.0)` format.
 """
 function backproject(c::Camera, point::Point2)

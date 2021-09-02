@@ -3,24 +3,26 @@ export SlamManager, Params, Camera, run!, to_cartesian
 export Visualizer, update_image!, update_axii!, expand_point_cloud!
 export add_camera_position!, update_frame!
 
-using LinearAlgebra
-using StaticArrays
+using DataStructures: OrderedSet
+using GLMakie
 using Images
 using ImageDraw
 using ImageFeatures
 using ImageTracking
-using Rotations
+using LeastSquaresOptim
+using LinearAlgebra
 using Manifolds
-using Parameters: @with_kw
-using DataStructures: OrderedSet
-using GLMakie
-
+using Random
 using RecoverPose
+using Rotations
+using StaticArrays
+using SparseArrays
+using SparseDiffTools
+using Parameters: @with_kw
 
 const Point2 = SVector{2}
 const Point2i = SVector{2, Int64}
 const Point2f = SVector{2, Float64}
-
 const Point3f = SVector{3, Float64}
 const Point3f0 = SVector{3, Float32}
 
@@ -65,6 +67,7 @@ include("map_manager.jl")
 include("front_end.jl")
 include("mapper.jl")
 include("visualizer.jl")
+include("bundle_adjustment.jl")
 
 mutable struct SlamManager
     params::Params

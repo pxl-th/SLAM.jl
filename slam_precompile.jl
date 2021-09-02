@@ -14,5 +14,10 @@ create_sysimage(
         :Parameters,
         :DataStructures,
         :GLMakie,
+
+        :LeastSquaresOptim,
+        :SparseArrays,
+        :SparsityDetection,
+        :SparseDiffTools,
     ]; sysimage_path="slam.so", precompile_execution_file="precompile.jl",
 )

@@ -68,6 +68,7 @@ mutable struct Frame
     KF id => Number of covisible KeyFrames with `KF id`.
     """
     covisible_kf::Dict{Int64, Int64}
+    local_map_ids::Set{Int64}
 end
 
 function Frame(;
@@ -90,29 +91,13 @@ function Frame(;
         keypoints, grid,
         nb_occupied_cells, cell_size,
         nb_keypoints, 0, 0,
-        Dict{Int64, Int64}(),
+        Dict{Int64, Int64}(), Set{Int64}(),
     )
 end
 
-# function Base.copy(f::Frame)
-#     Frame(
-#         f.id, f.kfid, f.time,
-#         f.cw, f.wc, f.camera,
-#         copy(f.keypoints), copy(f.keypoints_grid),
-#         f.nb_occupied_cells, f.cell_size,
-#         f.nb_keypoints, f.nb_2d_kpts, f.nb_3d_kpts,
-#         copy(f.covisible_kf),
-#     )
-# end
-
 get_keypoints(f::Frame) = f.keypoints |> values
-function get_2d_keypoints(f::Frame)
-    keypoints = Keypoint[]
-    for k in values(f.keypoints)
-        k.is_3d || push!(keypoints, k)
-    end
-    keypoints
-end
+get_2d_keypoints(f::Frame) = [k for k in values(f.keypoints) if !k.is_3d]
+get_3d_keypoints(f::Frame) = [k for k in values(f.keypoints) if k.is_3d]
 
 function add_keypoint!(
     f::Frame, point::Point2f, id::Int64;
@@ -195,12 +180,12 @@ function remove_keypoint_from_grid!(f::Frame, keypoint::Keypoint)
     end
 end
 
-function set_wc!(f::Frame, wc::SMatrix{4, 4, Float64})
+function set_wc!(f::Frame, wc)
     f.wc = wc
     f.cw = inv(SE3, wc)
 end
 
-function set_cw!(f::Frame, cw::SMatrix{4, 4, Float64})
+function set_cw!(f::Frame, cw)
     f.cw = cw
     f.wc = inv(SE3, cw)
 end
