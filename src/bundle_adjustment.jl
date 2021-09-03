@@ -35,13 +35,17 @@ However only small amount of elements are non-zero.
 - New points coordinates.
 - Error after minimization.
 """
-function full_bundle_adjustment(
+function bundle_adjustment(
     camera::Camera,
     extrinsics::Matrix{Float64},
     points::Matrix{Float64},
     pixels::Matrix{Float64},
     points_ids, extrinsic_ids;
+    iterations::Int = 10, show_trace::Bool = false,
 )
+    fx, fy = camera.fx, camera.fy
+    cx, cy = camera.cx, camera.cy
+
     n_observations = size(pixels, 2)
     n_poses = size(extrinsics, 2)
     n_points = size(points, 2)
@@ -62,7 +66,11 @@ function full_bundle_adjustment(
             T = @view(ext[:, extrinsic_ids[i]])
             pt = RotZYX(T[1:3]...) * pt .+ T[4:6]
             id = (i - 1) * 2
-            Y[(id + 1):(id + 2)] .= pixels[i] .- project(camera, pt)
+
+            px = @view(pixels[:, i]) # (y, x) format
+            inv_z = 1.0 / pt[3]
+            Y[id + 1] = px[1] - (fy * pt[2] * inv_z + cy)
+            Y[id + 2] = px[2] - (fx * pt[1] * inv_z + cx)
         end
     end
 
@@ -81,8 +89,12 @@ function full_bundle_adjustment(
         end
     end
 
+    residue!(Y, X0)
+    initial_error = mapreduce(abs2, +, Y)
+    Y .= 0.0
+
     colors = matrix_colors(J_sparsity)
-    g! = (J, x) -> forwarddiff_color_jacobian!(J, residue!, x; colorvec=colors)
+    g! = (j, x) -> forwarddiff_color_jacobian!(j, residue!, x; colorvec=colors)
     result = optimize!(
         LeastSquaresProblem(X0, Y, residue!, J_sparsity, g!),
         LevenbergMarquardt(LeastSquaresOptim.LSMR());
@@ -95,7 +107,7 @@ function full_bundle_adjustment(
     new_points = reshape(
         @view(result.minimizer[(poses_shift + 1):end]), 3, n_points,
     )
-    new_extrinsics, new_points, result.ssr
+    new_extrinsics, new_points, initial_error, result.ssr
 end
 
 function pnp_bundle_adjustment(
@@ -128,123 +140,162 @@ function pnp_bundle_adjustment(
     new_pose, initial_error, result.ssr
 end
 
-function look_at(position, target, up)
-    z_axis = (position - target) |> normalize
-    x_axis = (up × z_axis) |> normalize
-    y_axis = (z_axis × x_axis) |> normalize
+"""
+Perform Bundle-Adjustment on the new frame and its covisibility graph.
 
-    SMatrix{4, 4, Float64}(
-        x_axis[1], y_axis[1], z_axis[1], 0,
-        x_axis[2], y_axis[2], z_axis[2], 0,
-        x_axis[3], y_axis[3], z_axis[3], 0,
-        0, 0, 0, 1,
-    ) * SMatrix{4, 4, Float64}(
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        -position..., 1,
-    )
-end
+Minimize error function over all KeyFrame's extrinsic parameters
+in the covisibility graph and their corresponding MapPoint's positions.
+Afterwards, update these parameters.
+"""
+function local_bundle_adjustment!(
+    map_manager::MapManager, new_frame::Frame, params::Params,
+)
+    new_frame.nb_3d_kpts < params.min_cov_score && return
+    # Fix extrinsics of the two KeyFrames, to make them act as anchors.
+    n_fixed_keyframes = 2
+    # Get `new_frame`'s covisible KeyFrames.
+    map_cov_kf = new_frame.covisible_kf |> copy
+    map_cov_kf[new_frame.kfid] = new_frame.nb_3d_kpts
 
-function rot_at(position, target, up)
-    z_axis = (position - target) |> normalize
-    x_axis = (up × z_axis) |> normalize
-    y_axis = (z_axis × x_axis) |> normalize
+    @debug "[LBA] Initial covisibility size $(length(map_cov_kf))."
 
-    SMatrix{4, 4, Float64}(
-        x_axis[1], y_axis[1], z_axis[1], 0,
-        x_axis[2], y_axis[2], z_axis[2], 0,
-        x_axis[3], y_axis[3], z_axis[3], 0,
-        0, 0, 0, 1,
-    )
-end
+    bad_keypoints = Set{Int64}() # kpid
+    local_keyframes = Dict{Int64, Frame}() # kfid → Frame
+    # {mpid → {kfid → pixel}}
+    map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}()
+    extrinsics = Dict{Int64, NTuple{6, Float64}}() # kfid → extrinsics
+    constant_extrinsics = Dict{Int64, Bool}() # kfid → is constant
+    kp_ids_optimize = Set{Int64}() # kpid
 
-function fibbonachi_sphere(samples::Int)
-    points = Vector{GLMakie.Point3f}(undef, samples)
-    ϕ = π * (3.0 - √5)
-    for i in 1:samples
-        y = 1.0 - ((i - 1) / (samples - 1)) * 2
-        r = √(1 - y^2)
-        θ = ϕ * i
+    # Specifies maximum KeyFrame id in the covisibility graph.
+    # To avoid adding observer to the BA problem,
+    # that is more recent than the `new_frame`.
+    max_kfid = new_frame.kfid
 
-        x = cos(θ) * r
-        z = sin(θ) * r
-        points[i] = Point3f(x, y, z)
+    # Go through all KeyFrames in covisibility graph, get their extrinsics,
+    # mark them constant/non-constant, get their 3D Keypoints.
+    for (kfid, cov_score) in map_cov_kf
+        @debug "[LBA] Covisibility KF $kfid ↔ $cov_score"
+
+        kfid in keys(map_manager.frames_map) ||
+            (remove_covisible_kf!(new_frame, kfid); continue)
+
+        kf = map_manager.frames_map[kfid]
+        local_keyframes[kfid] = kf
+        extrinsics[kfid] = kf |> get_cw_ba
+
+        (cov_score < params.min_cov_score || kfid == 0) &&
+            (constant_extrinsics[kfid] = true; continue)
+        constant_extrinsics[kfid] = false
+        @debug "[LBA] Covisibility KF $kfid ↔ const $(constant_extrinsics[kfid])"
+
+        # Add ids of the 3D Keypoints to optimize.
+        for (kpid, kp) in kf.keypoints
+            kp.is_3d && push!(kp_ids_optimize, kpid)
+        end
     end
-    points
-end
+    @debug "[LBA] N 3D Keypoints to optimize $(length(kp_ids_optimize))."
+    @debug "[LBA] Max KF id $max_kfid."
 
-function ba_main()
-    f = 910
-    resolution = 1024
-    pp = resolution ÷ 2
-    camera = SLAM.Camera(
-        f, f, pp, pp,
-        0, 0, 0, 0,
-        resolution, resolution,
-    )
-    mp = backproject(camera, SLAM.Point2(512, 512))
+    n_pixels = 0
 
-    samples = 5
-    positions = fibbonachi_sphere(samples)[2:end-1]
-    cw = SMatrix{4, 4, Float64}[] # world → camera
-    directions = GLMakie.Vec3f[]
+    # Go through all 3D Keypoints to optimize.
+    # Link MapPoint with the observer KeyFrames
+    # and their corresponding pixel coordinates.
+    for kpid in kp_ids_optimize
+        kpid in keys(map_manager.map_points) || continue
+        mp = map_manager.map_points[kpid]
+        is_bad!(mp) && (push!(bad_keypoints, kpid); continue)
 
-    target = Point3f(0, 0, 0)
-    up = Point3f(0, 1, 0)
-    forward = Point4f(0, 0, -1, 1)
-    for position in positions
-        push!(cw, inv(SE3, look_at(position, target, up)))
-
-        d = inv(SE3, rot_at(position, target, up)) * forward
-        d = normalize(d[1:3] ./ d[4])
-        push!(directions, d)
+        mp_pixels = Dict{Int64, Point2f}()
+        # Link observer KeyFrames with the MapPoint.
+        # Add observer KeyFrames as constants, if not yet added.
+        for observer_id in mp.observer_keyframes_ids
+            observer_id > max_kfid && continue
+            # Get observer KeyFrame.
+            # If not in the local map,
+            # then add it from the global FramesMap as a constant.
+            if observer_id in keys(local_keyframes)
+                observer_kf = local_keyframes[observer_id]
+            else
+                if !(observer_id in keys(map_manager.frames_map))
+                    remove_mappoint_obs!(map_manager, kpid, observer_id)
+                    continue
+                end
+                observer_kf = map_manager.frames_map[observer_id]
+                local_keyframes[observer_id] = observer_kf
+                extrinsics[observer_id] = observer_kf |> get_cw_ba
+                constant_extrinsics[observer_id] = true
+            end
+            # Get corresponding pixel coordinate and link it to the MapPoint.
+            if !(kpid in keys(observer_kf.keypoints))
+                remove_mappoint_obs!(map_manager, kpid, observer_id)
+                continue
+            end
+            observer_kp = observer_kf.keypoints[kpid]
+            mp_pixels[observer_id] = observer_kp.undistorted_pixel
+            n_pixels += 1
+        end
+        map_points[mp.id] = mp_pixels
     end
 
-    figure = Figure(;resolution=(800, 800))
-    axis = Axis3(figure[1, 1])
+    @debug "[LBA] Covisibility size with observers $(length(local_keyframes))."
+    @debug "[LBA] N Pixels $n_pixels."
 
-    meshscatter!(axis, positions; markersize=0.01, color=:black)
-    meshscatter!(axis, [target]; markersize=0.01, color=:red)
-    arrows!(
-        axis, positions, directions;
-        lengthscale = 0.1, arrowsize=0.05, linewidth=0.01,
-        color=:black, quality=4,
+    # Convert data to the Bundle-Adjustment format.
+    constants_matrix = Vector{Bool}(undef, length(extrinsics))
+    extrinsics_matrix = Matrix{Float64}(undef, 6, length(extrinsics))
+    points_matrix = Matrix{Float64}(undef, 3, length(map_points))
+    pixels_matrix = Matrix{Float64}(undef, 2, n_pixels)
+
+    points_ids, extrinsics_ids = Int64[], Int64[]
+    extrinsics_order = Dict{Int64, Int64}()
+
+    extrinsic_id = 1
+    pixel_id = 1
+    point_id = 1
+
+    for (mpid, mplink) in map_points
+        points_matrix[:, point_id] .= map_manager.map_points[mpid].position
+
+        for (kfid, pixel) in mplink
+            push!(points_ids, point_id)
+
+            pixels_matrix[:, pixel_id] .= pixel
+            pixel_id += 1
+
+            if kfid in keys(extrinsics_order)
+                push!(extrinsics_ids, extrinsics_order[kfid])
+                continue
+            end
+
+            constants_matrix[extrinsic_id] = constant_extrinsics[kfid]
+            extrinsics_matrix[:, extrinsic_id] .= extrinsics[kfid]
+            extrinsics_order[kfid] = extrinsic_id
+            push!(extrinsics_ids, extrinsic_id)
+            extrinsic_id += 1
+        end
+
+        point_id += 1
+    end
+
+    @debug "[LBA] N Extrinsics $(extrinsic_id - 1)."
+    @debug "[LBA] N Pixels $(pixel_id - 1)."
+    @debug "[LBA] N Point id $(point_id - 1)."
+    @debug "[LBA] N Constant KeyFrames $(sum(constants_matrix))."
+
+    new_extrinsics, new_points, initial_error, final_error = bundle_adjustment(
+        new_frame.camera,
+        extrinsics_matrix, points_matrix,
+        pixels_matrix, points_ids, extrinsics_ids;
+        iterations=10, show_trace=true,
     )
-end
+    """
+    TODO
+    - constant mask for jacobian
+    - convert result back
+    """
 
-function p3p_ba_main()
-    n_points = 10
-    f = 910
-    resolution = 1024
-    pp = resolution ÷ 2
-    camera = SLAM.Camera(
-        f, f, pp, pp,
-        0, 0, 0, 0,
-        resolution, resolution,
-    )
-
-    θ = π / 8
-    R = RotXYZ(rand() * θ, rand() * θ, rand() * θ)
-    t = SVector{3, Float64}(rand(), rand() * 2, rand() * 3)
-    P_target = inv(SE3, to_4x4(R, t))
-
-    pmin = SVector{2}(1, 1)
-    pmax = SVector{2}(resolution, resolution)
-    δ = pmax - pmin
-
-    pixels_yx = [floor.(rand(SVector{2, Float64}) .* δ .+ pmin) for i in 1:n_points]
-    pixels_xy = [SVector{2, Float64}(p[2], p[1]) for p in pixels_yx]
-    points = [R * backproject(camera, p) .+ t for p in pixels_yx]
-
-    n_inliers, (KP, inliers, error) = p3p_ransac(points, pixels_xy, camera.K)
-    P = to_4x4(camera.iK * KP)
-
-    new_P, initial_error, resulting_error = pnp_bundle_adjustment(
-        camera, P, pixels_yx, points,
-    )
-    @show initial_error, resulting_error
-    display(P_target); println()
-    display(P); println()
-    display(new_P); println()
+    @debug "[LBA] BA error $initial_error → $final_error."
+    exit()
 end

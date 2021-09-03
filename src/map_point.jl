@@ -100,7 +100,7 @@ end
 
 function add_descriptor!(m::MapPoint, kfid::Int, descriptor::BitVector)
     kfid in keys(m.keyframes_descriptors) && return
-    
+
     descriptor_distance = 0.0
     m.keyframes_descriptors[kfid] = descriptor
     m.descriptor_distances_map[kfid] = descriptor_distance

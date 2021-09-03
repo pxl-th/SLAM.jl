@@ -54,6 +54,10 @@
     TODO: right now it is always performed, since there is no BA yet.
     """
     do_p3p::Bool = true
+    """
+    Minimum number of 3D MapPoints required to perform Bundle-Adjustment.
+    """
+    min_cov_score::Int = 25
 end
 
 function reset!(p::Params)

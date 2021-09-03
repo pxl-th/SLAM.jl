@@ -3,7 +3,7 @@ export SlamManager, Params, Camera, run!, to_cartesian
 export Visualizer, update_image!, update_axii!, expand_point_cloud!
 export add_camera_position!, update_frame!
 
-using DataStructures: OrderedSet
+using DataStructures: OrderedSet, OrderedDict
 using GLMakie
 using Images
 using ImageDraw

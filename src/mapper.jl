@@ -22,7 +22,7 @@ function run!(mapper::Mapper)
         @debug "[Mapper] Mapper is stopping - exit required."
         return
     end
-    
+
     succ, kf = mapper |> get_new_kf!
     succ || return
 
@@ -62,6 +62,7 @@ function run!(mapper::Mapper)
 
     # TODO match to local map
     # TODO send new KF to estimator for bundle adjustment
+    local_bundle_adjustment!(mapper.map_manager, new_keyframe, mapper.params)
     # TODO send new KF to loop closer
 end
 
@@ -171,7 +172,7 @@ function get_new_kf!(mapper::Mapper)::Tuple{Bool, Union{Nothing, KeyFrame}}
         mapper.new_kf_available = false
         return false, nothing
     end
-    
+
     keyframe = mapper.keyframe_queue |> popfirst!
     mapper.new_kf_available = !isempty(mapper.keyframe_queue)
     true, keyframe

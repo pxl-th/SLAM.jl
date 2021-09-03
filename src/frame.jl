@@ -195,6 +195,11 @@ get_Rcw(f::Frame) = f.cw[1:3, 1:3]
 get_twc(f::Frame) = f.wc[1:3, 4]
 get_tcw(f::Frame) = f.cw[1:3, 4]
 
+function get_cw_ba(f::Frame)
+    r = RotZYX(f.cw[1:3, 1:3])
+    (r.theta1, r.theta2, r.theta3, f.cw[1:3, 4]...)
+end
+
 function project_camera_to_world(f::Frame, point)
     f.wc * to_homogeneous(point)
 end
@@ -229,6 +234,11 @@ function turn_keypoint_3d!(f::Frame, id)
     kp.is_3d = true
     f.nb_2d_kpts -= 1
     f.nb_3d_kpts += 1
+end
+
+function remove_covisible_kf!(f::Frame, kfid)
+    kfid == f.kfid && return
+    kfid in f.covisible_kf && pop!(f.covisible_kf, kfid)
 end
 
 function reset!(f::Frame)
