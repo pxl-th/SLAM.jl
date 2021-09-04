@@ -21,8 +21,7 @@ function Visualizer(image_resolution)
     bottom_grid = figure[2, 1:2] = GridLayout()
 
     # Top grid configuration.
-
-    pc_axis = Axis3(top_grid[1, 1]; aspect=:data, azimuth=π / 8, elevation=1)
+    pc_axis = Axis3(top_grid[1, 1]; aspect=:data, azimuth=π / 2, elevation=2)
     image_axis = Makie.Axis(
         top_grid[1, 2]; aspect=DataAspect(),
         leftspinevisible=false, rightspinevisible=false,

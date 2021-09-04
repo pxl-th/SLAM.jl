@@ -200,6 +200,8 @@ function get_cw_ba(f::Frame)
     (r.theta1, r.theta2, r.theta3, f.cw[1:3, 4]...)
 end
 
+set_cw_ba!(f::Frame, θ) = set_cw!(f, to_4x4(RotZYX(θ[1:3]...), θ[4:6]))
+
 function project_camera_to_world(f::Frame, point)
     f.wc * to_homogeneous(point)
 end

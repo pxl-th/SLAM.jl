@@ -41,6 +41,7 @@ function bundle_adjustment(
     points::Matrix{Float64},
     pixels::Matrix{Float64},
     points_ids, extrinsic_ids;
+    constant_extrinsics::Union{Nothing, Vector{Bool}} = nothing,
     iterations::Int = 10, show_trace::Bool = false,
 )
     fx, fy = camera.fx, camera.fy
@@ -74,18 +75,22 @@ function bundle_adjustment(
         end
     end
 
+    check_constants = constant_extrinsics ≢ nothing
     J_sparsity = spzeros(Float64, n_observations * 2, n_parameters)
     for i in 1:n_observations
         id = 2 * (i - 1)
-        eid = (extrinsic_ids[i] - 1) * 6
+        # Set Jacobians for point's coordinates.
         pid = poses_shift + (points_ids[i] - 1) * 3
-        for j in 1:6
-            J_sparsity[id + 1, eid + j] = 1.0
-            J_sparsity[id + 2, eid + j] = 1.0
-        end
         for j in 1:3
             J_sparsity[id + 1, pid + j] = 1.0
             J_sparsity[id + 2, pid + j] = 1.0
+        end
+        # Set Jacobians for extrinsics if they are not constant.
+        check_constants && constant_extrinsics[extrinsic_ids[i]] && continue
+        eid = (extrinsic_ids[i] - 1) * 6
+        for j in 1:6
+            J_sparsity[id + 1, eid + j] = 1.0
+            J_sparsity[id + 2, eid + j] = 1.0
         end
     end
 
@@ -156,7 +161,6 @@ function local_bundle_adjustment!(
     # Get `new_frame`'s covisible KeyFrames.
     map_cov_kf = new_frame.covisible_kf |> copy
     map_cov_kf[new_frame.kfid] = new_frame.nb_3d_kpts
-
     @debug "[LBA] Initial covisibility size $(length(map_cov_kf))."
 
     bad_keypoints = Set{Int64}() # kpid
@@ -175,8 +179,6 @@ function local_bundle_adjustment!(
     # Go through all KeyFrames in covisibility graph, get their extrinsics,
     # mark them constant/non-constant, get their 3D Keypoints.
     for (kfid, cov_score) in map_cov_kf
-        @debug "[LBA] Covisibility KF $kfid ↔ $cov_score"
-
         kfid in keys(map_manager.frames_map) ||
             (remove_covisible_kf!(new_frame, kfid); continue)
 
@@ -187,7 +189,6 @@ function local_bundle_adjustment!(
         (cov_score < params.min_cov_score || kfid == 0) &&
             (constant_extrinsics[kfid] = true; continue)
         constant_extrinsics[kfid] = false
-        @debug "[LBA] Covisibility KF $kfid ↔ const $(constant_extrinsics[kfid])"
 
         # Add ids of the 3D Keypoints to optimize.
         for (kpid, kp) in kf.keypoints
@@ -249,7 +250,7 @@ function local_bundle_adjustment!(
     pixels_matrix = Matrix{Float64}(undef, 2, n_pixels)
 
     points_ids, extrinsics_ids = Int64[], Int64[]
-    extrinsics_order = Dict{Int64, Int64}()
+    extrinsics_order = Dict{Int64, Int64}() # kfid -> nkf
 
     extrinsic_id = 1
     pixel_id = 1
@@ -288,14 +289,29 @@ function local_bundle_adjustment!(
         new_frame.camera,
         extrinsics_matrix, points_matrix,
         pixels_matrix, points_ids, extrinsics_ids;
+        constant_extrinsics=constants_matrix,
         iterations=10, show_trace=true,
     )
     """
     TODO
-    - constant mask for jacobian
+    - constant mask for jacobian (at least two)
+    - remove outliers
+    - mappoint culling
     - convert result back
     """
-
     @debug "[LBA] BA error $initial_error → $final_error."
-    exit()
+
+    # Update KeyFframe poses and MapPoint positions.
+    for (kfid, nkfid) in extrinsics_order
+        constant_extrinsics[kfid] && continue
+        set_cw_ba!(
+            map_manager.frames_map[kfid], @view(new_extrinsics[:, nkfid]),
+        )
+    end
+    for (pid, mpid) in enumerate(keys(map_points))
+        new_position = @view(new_points[:, pid])
+        set_position!(
+            map_manager.map_points[mpid], new_position, 1.0 / new_position[3],
+        )
+    end
 end

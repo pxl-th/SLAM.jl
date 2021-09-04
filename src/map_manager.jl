@@ -126,7 +126,7 @@ function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
     kpid in keys(m.map_points) || return
     mappoint = m.map_points[kpid]
     remove_kf_observation!(mappoint, kfid)
-    
+
     frame_exists || return
     frame = m.frames_map[kfid]
     for observer_id in mappoint.observer_keyframes_ids
