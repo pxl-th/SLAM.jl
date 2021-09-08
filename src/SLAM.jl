@@ -1,7 +1,6 @@
 module SLAM
 export SlamManager, Params, Camera, run!, to_cartesian
-export Visualizer, update_image!, update_axii!, expand_point_cloud!
-export add_camera_position!, update_frame!
+export Visualizer
 
 using DataStructures: OrderedSet, OrderedDict
 using GLMakie
@@ -18,7 +17,6 @@ using Rotations
 using StaticArrays
 using SparseArrays
 using SparseDiffTools
-using Parameters: @with_kw
 
 const Point2 = SVector{2}
 const Point2i = SVector{2, Int64}
@@ -135,7 +133,6 @@ function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
         color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
         draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
     end
-    @debug "[SM] N outside $(n_outside)/$(length(frame.keypoints))"
     image
 end
 

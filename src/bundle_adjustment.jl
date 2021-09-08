@@ -66,6 +66,7 @@ function bundle_adjustment(
             pt = @view(pts[:, points_ids[i]])
             T = @view(ext[:, extrinsic_ids[i]])
             pt = RotZYX(T[1:3]...) * pt .+ T[4:6]
+            # TODO: check if Z > ϵ
             id = (i - 1) * 2
 
             px = @view(pixels[:, i]) # (y, x) format
@@ -168,8 +169,10 @@ function local_bundle_adjustment!(
     # {mpid → {kfid → pixel}}
     map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}()
     extrinsics = Dict{Int64, NTuple{6, Float64}}() # kfid → extrinsics
-    constant_extrinsics = Dict{Int64, Bool}() # kfid → is constant
     kp_ids_optimize = Set{Int64}() # kpid
+
+    constant_extrinsics = Dict{Int64, Bool}() # kfid → is constant
+    n_constants = 0
 
     # Specifies maximum KeyFrame id in the covisibility graph.
     # To avoid adding observer to the BA problem,
@@ -187,7 +190,10 @@ function local_bundle_adjustment!(
         extrinsics[kfid] = kf |> get_cw_ba
 
         (cov_score < params.min_cov_score || kfid == 0) &&
-            (constant_extrinsics[kfid] = true; continue)
+            (constant_extrinsics[kfid] = true;
+                n_constants += 1;
+                @info("[LBA] Adding constant with low cov score $cov_score, kfid $kfid.");
+                continue)
         constant_extrinsics[kfid] = false
 
         # Add ids of the 3D Keypoints to optimize.
@@ -226,7 +232,10 @@ function local_bundle_adjustment!(
                 observer_kf = map_manager.frames_map[observer_id]
                 local_keyframes[observer_id] = observer_kf
                 extrinsics[observer_id] = observer_kf |> get_cw_ba
+
+                @info "[LBA] Adding observer constant."
                 constant_extrinsics[observer_id] = true
+                n_constants += 1
             end
             # Get corresponding pixel coordinate and link it to the MapPoint.
             if !(kpid in keys(observer_kf.keypoints))
@@ -256,6 +265,25 @@ function local_bundle_adjustment!(
     pixel_id = 1
     point_id = 1
 
+    # Ensure there are at least 2 fixed Keyframes.
+    if (n_constants < 2 && length(extrinsics) > 2)
+        @info "[LBA] Adding at least two constants."
+        for kfid in keys(constant_extrinsics)
+            constant_extrinsics[kfid] && continue
+            constant_extrinsics[kfid] = true
+            n_constants += 1
+            n_constants == 2 && break
+        end
+    end
+
+    """
+    TODO:
+    - fast run (5 iters) to select outliers
+    - remove outlier mappoints
+    - refine solution on inliers only (10 iterations)
+    """
+
+    # Convert to matrix form.
     for (mpid, mplink) in map_points
         points_matrix[:, point_id] .= map_manager.map_points[mpid].position
 
@@ -294,10 +322,8 @@ function local_bundle_adjustment!(
     )
     """
     TODO
-    - constant mask for jacobian (at least two)
     - remove outliers
     - mappoint culling
-    - convert result back
     """
     @debug "[LBA] BA error $initial_error → $final_error."
 

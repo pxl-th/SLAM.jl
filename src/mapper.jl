@@ -87,7 +87,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
     cam = frame.camera
 
     # Go through all 2D keypoints in `frame`.
-    for (i, kp) in enumerate(keypoints)
+    for kp in keypoints
         # Remove mappoints observation if not in map.
         if !(kp.id in keys(mapper.map_manager.map_points))
             remove_mappoint_obs!(mapper.map_manager, kp.id, frame.kfid)
@@ -164,7 +164,6 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         good += 1
     end
     @debug "[Mapper] Temporal triangulation: $good/$candidates good KeyPoints."
-    # @assert good > 0
 end
 
 function get_new_kf!(mapper::Mapper)::Tuple{Bool, Union{Nothing, KeyFrame}}

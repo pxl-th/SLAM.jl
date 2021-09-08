@@ -1,4 +1,4 @@
-@with_kw mutable struct Params
+Base.@kwdef mutable struct Params
     max_nb_keypoints::Int = 1000
     """
     Cell size of the grid in the Frame.
