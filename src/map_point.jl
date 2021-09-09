@@ -50,8 +50,7 @@ function MapPoint(id, kfid, descriptor, is_observed::Bool = true)
     MapPoint(
         id, kfid, observed_keyframes_ids,
         descriptor, keyframes_descriptors, descriptor_distances_map,
-        position, inv_depth,
-        is_3d, is_observed,
+        position, inv_depth, is_3d, is_observed,
     )
 end
 

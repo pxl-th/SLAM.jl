@@ -93,6 +93,7 @@ function SlamManager(params::Params, camera::Camera)
         params.max_nb_keypoints, avoidance_radius,
         grid_resolution, params.max_distance,
     )
+
     map_manager = MapManager(params, frame, extractor)
     front_end = FrontEnd(params, frame, map_manager)
     mapper = Mapper(params, map_manager, frame)

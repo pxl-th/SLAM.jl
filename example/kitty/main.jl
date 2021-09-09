@@ -67,7 +67,6 @@ function main(n_frames::Int)
     @load positions_save_file slam_positions
 
     visualizer = Visualizer((height, width))
-
     vpc = Observable(Point3f0[])
     vpositions = Observable(Point3f0[])
     image = Observable(zeros(RGB{Float64}, width, height))

@@ -34,6 +34,8 @@ However only small amount of elements are non-zero.
 - New extrinsic parameters.
 - New points coordinates.
 - Error after minimization.
+- Outliers array, which shows for each observation,
+  whether the observation is and outlier.
 """
 function bundle_adjustment(
     camera::Camera,
@@ -42,8 +44,10 @@ function bundle_adjustment(
     pixels::Matrix{Float64},
     points_ids, extrinsic_ids;
     constant_extrinsics::Union{Nothing, Vector{Bool}} = nothing,
-    iterations::Int = 10, show_trace::Bool = false,
+    outliers_iterations::Int = 5, iterations::Int = 10,
+    show_trace::Bool = false, depth_ϵ::Real = 1e-6, repr_ϵ::Real = 5.0,
 )
+    check_constants = constant_extrinsics ≢ nothing
     fx, fy = camera.fx, camera.fy
     cx, cy = camera.cx, camera.cy
 
@@ -53,6 +57,9 @@ function bundle_adjustment(
     poses_shift = n_poses * 6
     n_parameters = poses_shift + n_points * 3
 
+    # Outlier is a mappoint that has either a negative depth in camera view
+    # or big reprojection error.
+    outliers = fill(false, n_observations)
     X0 = vcat(
         reshape(extrinsics, length(extrinsics)),
         reshape(points, length(points)),
@@ -62,47 +69,77 @@ function bundle_adjustment(
     function residue!(Y, X)
         ext = reshape(@view(X[1:poses_shift]), 6, n_poses)
         pts = reshape(@view(X[(poses_shift + 1):end]), 3, n_points)
-        for i in 1:n_observations
+        @inbounds for i in 1:n_observations
+            id = (i - 1) * 2
+
+            if outliers[i]
+                Y[id + 1] = 0.0
+                Y[id + 2] = 0.0
+                continue
+            end
+
             pt = @view(pts[:, points_ids[i]])
             T = @view(ext[:, extrinsic_ids[i]])
             pt = RotZYX(T[1:3]...) * pt .+ T[4:6]
-            # TODO: check if Z > ϵ
-            id = (i - 1) * 2
+            outliers[i] = outliers[i] || pt[3] < depth_ϵ
 
             px = @view(pixels[:, i]) # (y, x) format
             inv_z = 1.0 / pt[3]
             Y[id + 1] = px[1] - (fy * pt[2] * inv_z + cy)
             Y[id + 2] = px[2] - (fx * pt[1] * inv_z + cx)
+            outliers[i] = outliers[i] || (Y[id + 1]^2 + Y[id + 2]^2) > repr_ϵ
         end
     end
 
-    check_constants = constant_extrinsics ≢ nothing
-    J_sparsity = spzeros(Float64, n_observations * 2, n_parameters)
-    for i in 1:n_observations
-        id = 2 * (i - 1)
-        # Set Jacobians for point's coordinates.
-        pid = poses_shift + (points_ids[i] - 1) * 3
-        for j in 1:3
-            J_sparsity[id + 1, pid + j] = 1.0
-            J_sparsity[id + 2, pid + j] = 1.0
+    function compute_jacobian_sparsity!()
+        J_sparsity = spzeros(Float64, n_observations * 2, n_parameters)
+        @inbounds for i in 1:n_observations
+            # If mappoint is outlier for that observation,
+            # then leave zero Jacobian for it, e.g. no updates.
+            outliers[i] && continue
+            id = 2 * (i - 1)
+            # Set Jacobians for point's coordinates.
+            pid = poses_shift + (points_ids[i] - 1) * 3
+            for j in 1:3
+                J_sparsity[id + 1, pid + j] = 1.0
+                J_sparsity[id + 2, pid + j] = 1.0
+            end
+            # Set Jacobians for extrinsics if they are not constant.
+            check_constants && constant_extrinsics[extrinsic_ids[i]] && continue
+            eid = (extrinsic_ids[i] - 1) * 6
+            for j in 1:6
+                J_sparsity[id + 1, eid + j] = 1.0
+                J_sparsity[id + 2, eid + j] = 1.0
+            end
         end
-        # Set Jacobians for extrinsics if they are not constant.
-        check_constants && constant_extrinsics[extrinsic_ids[i]] && continue
-        eid = (extrinsic_ids[i] - 1) * 6
-        for j in 1:6
-            J_sparsity[id + 1, eid + j] = 1.0
-            J_sparsity[id + 2, eid + j] = 1.0
-        end
+
+        colorvec = matrix_colors(J_sparsity)
+        grad! = (j, x) -> forwarddiff_color_jacobian!(j, residue!, x; colorvec)
+        J_sparsity, grad!
     end
 
     residue!(Y, X0)
     initial_error = mapreduce(abs2, +, Y)
     Y .= 0.0
 
-    colors = matrix_colors(J_sparsity)
-    g! = (j, x) -> forwarddiff_color_jacobian!(j, residue!, x; colorvec=colors)
+    # Fast run, to detect outliers.
+    if outliers_iterations == 0
+        outliers_minimizer = X0
+    else
+        J_sparsity, g! = compute_jacobian_sparsity!()
+        outliers_result = optimize!(
+            LeastSquaresProblem(X0, Y, residue!, J_sparsity, g!),
+            LevenbergMarquardt(LeastSquaresOptim.LSMR());
+            iterations=outliers_iterations, show_trace,
+        )
+        outliers_minimizer = outliers_result.minimizer
+    end
+
+    # Recompute Jacobian sparsity ignoring outliers and perform full run.
+    Y .= 0.0
+    J_sparsity, g! = compute_jacobian_sparsity!()
     result = optimize!(
-        LeastSquaresProblem(X0, Y, residue!, J_sparsity, g!),
+        LeastSquaresProblem(outliers_minimizer, Y, residue!, J_sparsity, g!),
         LevenbergMarquardt(LeastSquaresOptim.LSMR());
         iterations, show_trace,
     )
@@ -113,7 +150,7 @@ function bundle_adjustment(
     new_points = reshape(
         @view(result.minimizer[(poses_shift + 1):end]), 3, n_points,
     )
-    new_extrinsics, new_points, initial_error, result.ssr
+    new_extrinsics, new_points, initial_error, result.ssr, outliers
 end
 
 function pnp_bundle_adjustment(
@@ -164,7 +201,7 @@ function local_bundle_adjustment!(
     map_cov_kf[new_frame.kfid] = new_frame.nb_3d_kpts
     @debug "[LBA] Initial covisibility size $(length(map_cov_kf))."
 
-    bad_keypoints = Set{Int64}() # kpid
+    bad_keypoints = Set{Int64}() # kpid/mpid
     local_keyframes = Dict{Int64, Frame}() # kfid → Frame
     # {mpid → {kfid → pixel}}
     map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}()
@@ -190,10 +227,7 @@ function local_bundle_adjustment!(
         extrinsics[kfid] = kf |> get_cw_ba
 
         (cov_score < params.min_cov_score || kfid == 0) &&
-            (constant_extrinsics[kfid] = true;
-                n_constants += 1;
-                @info("[LBA] Adding constant with low cov score $cov_score, kfid $kfid.");
-                continue)
+            (constant_extrinsics[kfid] = true; n_constants += 1; continue)
         constant_extrinsics[kfid] = false
 
         # Add ids of the 3D Keypoints to optimize.
@@ -214,9 +248,9 @@ function local_bundle_adjustment!(
         mp = map_manager.map_points[kpid]
         is_bad!(mp) && (push!(bad_keypoints, kpid); continue)
 
-        mp_pixels = Dict{Int64, Point2f}()
         # Link observer KeyFrames with the MapPoint.
         # Add observer KeyFrames as constants, if not yet added.
+        mplink = Dict{Int64, Point2f}()
         for observer_id in mp.observer_keyframes_ids
             observer_id > max_kfid && continue
             # Get observer KeyFrame.
@@ -233,7 +267,6 @@ function local_bundle_adjustment!(
                 local_keyframes[observer_id] = observer_kf
                 extrinsics[observer_id] = observer_kf |> get_cw_ba
 
-                @info "[LBA] Adding observer constant."
                 constant_extrinsics[observer_id] = true
                 n_constants += 1
             end
@@ -243,10 +276,20 @@ function local_bundle_adjustment!(
                 continue
             end
             observer_kp = observer_kf.keypoints[kpid]
-            mp_pixels[observer_id] = observer_kp.undistorted_pixel
+            mplink[observer_id] = observer_kp.undistorted_pixel
             n_pixels += 1
         end
-        map_points[mp.id] = mp_pixels
+        map_points[mp.id] = mplink
+    end
+
+    # Ensure there are at least 2 fixed Keyframes.
+    if (n_constants < 2 && length(extrinsics) > 2)
+        for kfid in keys(constant_extrinsics)
+            constant_extrinsics[kfid] && continue
+            constant_extrinsics[kfid] = true
+            n_constants += 1
+            n_constants == 2 && break
+        end
     end
 
     @debug "[LBA] Covisibility size with observers $(length(local_keyframes))."
@@ -261,27 +304,7 @@ function local_bundle_adjustment!(
     points_ids, extrinsics_ids = Int64[], Int64[]
     extrinsics_order = Dict{Int64, Int64}() # kfid -> nkf
 
-    extrinsic_id = 1
-    pixel_id = 1
-    point_id = 1
-
-    # Ensure there are at least 2 fixed Keyframes.
-    if (n_constants < 2 && length(extrinsics) > 2)
-        @info "[LBA] Adding at least two constants."
-        for kfid in keys(constant_extrinsics)
-            constant_extrinsics[kfid] && continue
-            constant_extrinsics[kfid] = true
-            n_constants += 1
-            n_constants == 2 && break
-        end
-    end
-
-    """
-    TODO:
-    - fast run (5 iters) to select outliers
-    - remove outlier mappoints
-    - refine solution on inliers only (10 iterations)
-    """
+    extrinsic_id, pixel_id, point_id = 1, 1, 1
 
     # Convert to matrix form.
     for (mpid, mplink) in map_points
@@ -313,31 +336,87 @@ function local_bundle_adjustment!(
     @debug "[LBA] N Point id $(point_id - 1)."
     @debug "[LBA] N Constant KeyFrames $(sum(constants_matrix))."
 
-    new_extrinsics, new_points, initial_error, final_error = bundle_adjustment(
-        new_frame.camera,
-        extrinsics_matrix, points_matrix,
+    new_extrinsics, new_points, initial_error, final_error, outliers = bundle_adjustment(
+        new_frame.camera, extrinsics_matrix, points_matrix,
         pixels_matrix, points_ids, extrinsics_ids;
         constant_extrinsics=constants_matrix,
         iterations=10, show_trace=true,
     )
-    """
-    TODO
-    - remove outliers
-    - mappoint culling
-    """
+    @debug "[LBA] N Outliers $(sum(outliers))."
     @debug "[LBA] BA error $initial_error → $final_error."
 
-    # Update KeyFframe poses and MapPoint positions.
+    # Select outliers and prepare them for removal.
+    kfmp_outliers = Dict{Int64, Int64}()
+    pixel_id = 1
+    for (mpid, mplink) in map_points
+        for (kfid, _) in mplink
+            outliers[pixel_id] || (pixel_id += 1; continue)
+            pixel_id += 1
+
+            kfid in keys(map_cov_kf) &&
+                remove_mappoint_obs!(map_manager, mpid, kfid)
+            kfid == map_manager.current_frame.kfid &&
+                remove_obs_from_current_frame!(map_manager, mpid)
+
+            push!(bad_keypoints, mpid)
+        end
+    end
+
+    @debug "[LBA] N Bad Keypoints $(length(bad_keypoints))"
+
+    # Update KeyFrame poses.
     for (kfid, nkfid) in extrinsics_order
         constant_extrinsics[kfid] && continue
         set_cw_ba!(
             map_manager.frames_map[kfid], @view(new_extrinsics[:, nkfid]),
         )
     end
+
     for (pid, mpid) in enumerate(keys(map_points))
+        if !(mpid in keys(map_manager.map_points))
+            mpid in bad_keypoints && pop!(bad_keypoints, mpid)
+            continue
+        end
+
+        mp = map_manager.map_points[mpid]
+        if is_bad!(mp)
+            remove_mappoint!(map_manager, mpid)
+            mpid in bad_keypoints && pop!(bad_keypoints, mpid)
+            continue
+        end
+
+        # MapPoint culling.
+        # Remove MapPoint, if it has < 3 observers,
+        # not observed by the current frames_map
+        # and was added less than 3 keyframes ago.
+        # Meaning it was unrealiable.
+        if length(mp.observer_keyframes_ids) < 3
+            if mp.kfid < new_frame.kfid - 3 && !mp.is_observed
+                remove_mappoint!(map_manager, mpid)
+                mpid in bad_keypoints && pop!(bad_keypoints, mpid)
+                continue
+            end
+        end
+
+        # MapPoint is good, update its position.
         new_position = @view(new_points[:, pid])
         set_position!(
             map_manager.map_points[mpid], new_position, 1.0 / new_position[3],
         )
+    end
+
+    # MapPoint culling for bad observations.
+    for mpid in bad_keypoints
+        mpid in keys(map_manager.map_points) && mpid in keys(map_points) ||
+            continue
+
+        mp = map_manager.map_points[mpid]
+        is_bad!(mp) && (remove_mappoint!(map_manager, mpid); continue)
+
+        if length(mp.observer_keyframes_ids) < 3
+            if mp.kfid < new_frame.kfid - 3 && !mp.is_observed
+                remove_mappoint!(map_manager, mpid)
+            end
+        end
     end
 end

@@ -52,7 +52,7 @@ mutable struct Frame
     camera::Camera
     """
     Map of observed keypoints.
-    Keypoint id => Keypoint.
+    Keypoint id → Keypoint.
     """
     keypoints::Dict{Int64, Keypoint}
     keypoints_grid::Matrix{Set{Int64}}
@@ -65,7 +65,7 @@ mutable struct Frame
     nb_3d_kpts::Int64
     """
     Map of covisible KeyFrames.
-    KF id => Number of covisible KeyFrames with `KF id`.
+    KFid → Number of MapPoints that this Frame shared with `KFid` frame.
     """
     covisible_kf::Dict{Int64, Int64}
     local_map_ids::Set{Int64}

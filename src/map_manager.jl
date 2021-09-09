@@ -91,13 +91,36 @@ function add_mappoint!(m::MapManager, descriptor)
 end
 
 """
+Remove MapPoint from the map given its id.
+
+Removing a mappoint, also update covisibility scores of the observer Frames.
+If MapPoint is observed by the current Frame, remove its keypoint as well.
+"""
+function remove_mappoint!(m::MapManager, id)
+    id in keys(m.map_points) || return
+    mp = m.map_points[id]
+    for observer_id in mp.observer_keyframes_ids
+        observer_id in keys(m.frames_map) || continue
+        observer_kf = m.frames_map[observer_id]
+
+        remove_keypoint!(observer_kf, id)
+        for co_observer_id in mp.observer_keyframes_ids
+            observer_id == co_observer_id && continue
+            decrease_covisible_kf!(observer_kf, co_observer_id)
+        end
+    end
+
+    mp.is_observed && remove_keypoint!(m.current_frame, id)
+    mp.is_3d && (m.nb_mappoints -= 1;)
+    pop!(m.map_points, id)
+end
+
+"""
 Copy current MapManager's Frame and add it to the KeyFrame map.
 Increase current keyframe id & total number of keyframes.
 """
 function add_keyframe!(m::MapManager)
     m.frames_map[m.current_keyframe_id] = m.current_frame |> deepcopy
-    # @debug "[MapManager] Copying current frame $(m.current_keyframe_id)"
-    # m.frames_map[m.current_keyframe_id] = m.current_frame |> copy
     m.current_keyframe_id += 1
     m.nb_keyframes += 1
 end
@@ -109,10 +132,11 @@ function remove_obs_from_current_frame!(m::MapManager, id::Int64)
     remove_keypoint!(m.current_frame, id)
     # TODO visualization related part. Point-cloud point removal.
     # Set MapPoint as not observable.
-    # if !(id in keys(m.map_points))
-    #     # TODO Reset point in point-cloud to origin-point.
-    #     return
-    # end
+    if id in keys(m.map_points)
+        m.map_points[id].is_observed = false
+    else
+        # TODO Reset point in visualization point-cloud to origin.
+    end
 end
 
 """
