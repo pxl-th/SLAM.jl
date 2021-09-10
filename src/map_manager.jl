@@ -125,6 +125,24 @@ function add_keyframe!(m::MapManager)
     m.nb_keyframes += 1
 end
 
+function remove_keyframe!(m::MapManager, kfid)
+    kfid in keys(m.frames_map) || return
+
+    kf = m.frames_map[kfid]
+    for kp in get_keypoints(kf)
+        kp.id in keys(m.map_points) &&
+            remove_kf_observation!(m.map_points[kp.id], kfid)
+    end
+
+    for cov_kfid in keys(kf.covisible_kf)
+        cov_kfid in keys(m.frames_map) &&
+            remove_covisible_kf!(m.frames_map[cov_kfid], kfid)
+    end
+
+    pop!(m.frames_map, kfid)
+    m.nb_keyframes -= 1
+end
+
 """
 Remove a MapPoint observation from current Frame by `id`.
 """

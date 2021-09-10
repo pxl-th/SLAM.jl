@@ -1,1 +1,0 @@
-JULIA_DEBUG=SLAM julia -t4 --project=. --sysimage=slam.so src/SLAM.jl

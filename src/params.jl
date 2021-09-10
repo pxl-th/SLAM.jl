@@ -58,6 +58,11 @@ Base.@kwdef mutable struct Params
     Minimum number of 3D MapPoints required to perform Bundle-Adjustment.
     """
     min_cov_score::Int = 25
+    """
+    Number of good keypoints divided by the total number of keypoints in a Frame.
+    This is used to filter out non-informative Frames.
+    """
+    filtering_ratio::Real = 0.9
 end
 
 function reset!(p::Params)

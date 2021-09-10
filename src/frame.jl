@@ -240,7 +240,7 @@ end
 
 function remove_covisible_kf!(f::Frame, kfid)
     kfid == f.kfid && return
-    kfid in f.covisible_kf && pop!(f.covisible_kf, kfid)
+    kfid in keys(f.covisible_kf) && pop!(f.covisible_kf, kfid)
 end
 
 function reset!(f::Frame)

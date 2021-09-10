@@ -61,9 +61,59 @@ function run!(mapper::Mapper)
     update_frame_covisibility!(mapper.map_manager, new_keyframe)
 
     # TODO match to local map
-    # TODO send new KF to estimator for bundle adjustment
+    # Send new KF to estimator for bundle adjustment
     local_bundle_adjustment!(mapper.map_manager, new_keyframe, mapper.params)
+    map_filtering!(mapper.map_manager, new_keyframe, mapper.params)
     # TODO send new KF to loop closer
+end
+
+"""
+Filter out KeyFrames that share too many MapPoints with other KeyFrames
+in the covisibility graph. Since they are not informative.
+"""
+function map_filtering!(map_manager::MapManager, new_keyframe::Frame, params)
+    params.filtering_ratio ≥ 1 && return
+    new_keyframe.kfid < 20 && return
+
+    covisibility_map = new_keyframe.covisible_kf
+    n_removed = 0
+    for kfid in keys(covisibility_map)
+        # TODO if new kf is available → break
+        kfid == 0 && break
+        kfid ≥ new_keyframe.kfid && continue
+
+        if !(kfid in keys(map_manager.frames_map))
+            remove_covisible_kf!(new_keyframe, kfid)
+            continue
+        end
+
+        kf = map_manager.frames_map[kfid]
+        if kf.nb_3d_kpts < params.min_cov_score ÷ 2
+            remove_keyframe!(map_manager, kfid)
+            n_removed += 1
+            continue
+        end
+
+        n_good, n_total = 0, 0
+        for kp in get_3d_keypoints(kf)
+            if !(kp.id in keys(map_manager.map_points))
+                remove_mappoint_obs!(kp.id, kfid)
+                continue
+            end
+            mp = map_manager.map_points[kp.id]
+            is_bad!(mp) && continue
+
+            length(mp.observer_keyframes_ids) > 4 && (n_good += 1;)
+            n_total += 1;
+            # TODO if new kf is available → break
+        end
+
+        ratio = n_good / n_total
+        ratio > params.filtering_ratio &&
+            (remove_keyframe!(map_manager, kfid); n_removed += 1)
+    end
+
+    @debug "[MF] Removed $n_removed KeyFrames."
 end
 
 function triangulate_temporal!(mapper::Mapper, frame::Frame)
