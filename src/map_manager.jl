@@ -28,7 +28,7 @@ function create_keyframe!(m::MapManager, image)
 end
 
 function prepare_frame!(m::MapManager)
-    m.current_frame.kfid = m.nb_keyframes
+    m.current_frame.kfid = m.current_keyframe_id
 
     # Filter if there are too many keypoints.
     # if m.current_frame.nb_keypoints > m.params.max_nb_keypoints

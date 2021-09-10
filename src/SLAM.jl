@@ -112,8 +112,8 @@ function run!(sm::SlamManager, image, time)
     sm.frame_id += 1
     sm.current_frame.id = sm.frame_id
     sm.current_frame.time = time
-    @debug "[Slam Manager] Frame $(sm.frame_id) @ $time"
-    @debug "[Slam Manager] Fid $(sm.current_frame.id), KFid $(sm.current_frame.kfid)"
+    @debug "[SM] Frame $(sm.frame_id) @ $time"
+    @debug "[SM] Fid $(sm.current_frame.id), KFid $(sm.current_frame.kfid)"
 
     # Send image to the front end.
     is_kf_required = track!(sm.front_end, image, time)
@@ -122,6 +122,7 @@ function run!(sm::SlamManager, image, time)
     # Send it to the mapper queue for traingulation.
     is_kf_required || return
 
+    @debug "[SM] Adding new KF $(sm.current_frame.kfid)."
     add_new_kf!(sm.mapper, KeyFrame(sm.current_frame.kfid, image))
     sm.mapper |> run!
 end

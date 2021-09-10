@@ -1,5 +1,5 @@
 """
-Perform full Bundle-Adjustment.
+Perform Bundle-Adjustment.
 
 Minimize error function over camera extrinsics and points positions.
 Leaving camera's intrinsics and pixel coordinates intact.
@@ -163,7 +163,7 @@ function pnp_bundle_adjustment(
     Y = zeros(Float64, length(pixels) * 2)
 
     function residue!(Y, X)
-        for i in 1:length(points)
+        @inbounds for i in 1:length(points)
             id = (i - 1) * 2
             pt = RotZYX(@view(X[1:3])...) * points[i] .+ @view(X[4:6])
             Y[(id + 1):(id + 2)] .= pixels[i] .- project(camera, pt)
