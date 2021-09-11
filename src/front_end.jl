@@ -74,16 +74,11 @@ Compute pose of a current Frame using P3P Ransac algorithm.
 """
 function compute_pose!(fe::FrontEnd)
     if fe.current_frame.nb_3d_kpts < 5
-        n3d = length([m for m in values(fe.current_frame.keypoints) if m.is_3d])
         @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts) but $n3d."
         return
     end
-    n3d = length([m for m in values(fe.current_frame.keypoints) if m.is_3d])
-    @debug "[Front-End] Enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts) but $n3d."
 
-    # TODO for now we always do p3p, since there is no BA.
-    # do_p3p = fe.p3p_required || fe.params.do_p3p
-    do_p3p = true
+    do_p3p = fe.p3p_required || fe.params.do_p3p
 
     p3p_pixels = Point2f[]
     p3p_pdn_positions = Point3f[]
@@ -95,47 +90,59 @@ function compute_pose!(fe::FrontEnd)
         kp.id in keys(fe.map_manager.map_points) || continue
 
         mp = fe.map_manager.map_points[kp.id]
+        do_p3p && push!(p3p_pdn_positions, normalize(kp.position))
         # TODO do_p3p &&
-        push!(p3p_pdn_positions, normalize(kp.position))
         # Convert pixel to `(x, y)` format, expected by P3P.
         push!(p3p_pixels, kp.undistorted_pixel[[2, 1]])
         push!(p3p_3d_points, mp.position)
         push!(p3p_kpids, kp.id)
     end
 
-    # TODO if do_p3p
-    # P3P computes world->camera projection.
-    n_inliers, model = p3p_ransac(
-        p3p_3d_points, p3p_pixels, p3p_pdn_positions,
-        fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
+    if do_p3p
+        # P3P computes world->camera projection.
+        n_inliers, model = p3p_ransac(
+            p3p_3d_points, p3p_pixels, p3p_pdn_positions,
+            fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
+        )
+        if n_inliers < 5 || model ≡ nothing
+            @warn "[Front-End] Not enough inliers for reliable P3P pose estimation."
+            fe |> reset_frame!
+            return
+        end
+        @debug "[FE] P3P $(n_inliers)/$(length(p3p_pixels)) inliers"
+        KP, inliers, error = model
+        set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP))
+
+        # Remove outliers after P3P.
+        for (kpid, inlier) in zip(p3p_kpids, inliers)
+            inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
+        end
+
+        # Prepare data for BA refinement.
+        p3p_3d_points = p3p_3d_points[inliers]
+        p3p_kpids = p3p_kpids[inliers]
+        ba_pixels = [
+            Point2f(p[2], p[1]) for (inlier, p) in zip(inliers, p3p_pixels)
+            if inlier
+        ]
+    else
+        ba_pixels = [Point2f(p[2], p[1]) for p in p3p_pixels]
+    end
+
+    new_T, init_error, res_error, outliers, n_outliers = pnp_bundle_adjustment(
+        fe.current_frame.camera, fe.current_frame.cw,
+        ba_pixels, p3p_3d_points; iterations=10, show_trace=true,
     )
-    if n_inliers < 5 || model ≡ nothing
-        @warn "[Front-End] Not enough inliers for reliable P3P pose estimation."
-        fe |> reset_frame!
+    @debug "[FE] BA Pose: outliers $n_outliers, $init_error → $res_error."
+    if length(p3p_3d_points) - n_outliers < 5 || res_error > init_error
+        fe.p3p_required = true
         return
     end
-    @debug "[FE] P3P $(n_inliers)/$(length(p3p_pixels)) inliers"
-    KP, inliers, error = model
-    P = to_4x4(fe.current_frame.camera.iK * KP)
 
-    # Remove outliers after P3P.
-    for (kpid, inlier) in zip(p3p_kpids, inliers)
-        inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
+    for (kpid, outlier) in zip(p3p_kpids, outliers)
+        outlier && remove_obs_from_current_frame!(fe.map_manager, kpid)
     end
-    set_cw!(fe.current_frame, P)
-
-    ba_pixels = [
-        Point2f(p[2], p[1]) for (inlier, p) in zip(inliers, p3p_pixels)
-        if inlier
-    ]
-    @debug "[FE] Pose refinement."
-
-    # TODO add outlier detection and remove after BA.
-    new_T, ba_init_error, ba_res_error = pnp_bundle_adjustment(
-        fe.current_frame.camera, fe.current_frame.cw,
-        ba_pixels, p3p_3d_points[inliers]; iterations=10, show_trace=true,
-    )
-    ba_res_error < ba_init_error && set_cw!(fe.current_frame, new_T)
+    set_cw!(fe.current_frame, new_T)
     fe.p3p_required = false
 end
 

@@ -29,39 +29,39 @@ function main(n_frames::Int)
         height, width,
     )
     params = Params()
-    slam_manager = SlamManager(params, camera)
-    base_position = SVector{4, Float64}(0, 0, 0, 1)
+    # slam_manager = SlamManager(params, camera)
+    # base_position = SVector{4, Float64}(0, 0, 0, 1)
 
-    slam_positions = Point3f0[]
-    slam_mappoints = Vector{Point3f0}[]
-    slam_mp_ids = Set{Int64}()
+    # slam_positions = Point3f0[]
+    # slam_mappoints = Vector{Point3f0}[]
+    # slam_mp_ids = Set{Int64}()
 
-    for i in 1:n_frames
-        timestamp = dataset.timestamps[i]
-        frame = dataset[i] .|> Gray{Float64}
-        run!(slam_manager, frame, timestamp)
+    # for i in 1:n_frames
+    #     timestamp = dataset.timestamps[i]
+    #     frame = dataset[i] .|> Gray{Float64}
+    #     run!(slam_manager, frame, timestamp)
 
-        vframe = SLAM.draw_keypoints!(
-            RGB{Float64}.(frame), slam_manager.current_frame,
-        )
-        save(joinpath(frames_dir, "frame-$i.png"), vframe)
+    #     vframe = SLAM.draw_keypoints!(
+    #         RGB{Float64}.(frame), slam_manager.current_frame,
+    #     )
+    #     save(joinpath(frames_dir, "frame-$i.png"), vframe)
 
-        position = Point3f0((slam_manager.current_frame.wc * base_position)[1:3])
-        push!(slam_positions, position[[1, 3, 2]])
+    #     position = Point3f0((slam_manager.current_frame.wc * base_position)[1:3])
+    #     push!(slam_positions, position[[1, 3, 2]])
 
-        frame_pc = Point3f0[]
-        for (mid, mp) in slam_manager.map_manager.map_points
-            mp.is_3d || continue
-            mid in slam_mp_ids && continue
+    #     frame_pc = Point3f0[]
+    #     for (mid, mp) in slam_manager.map_manager.map_points
+    #         mp.is_3d || continue
+    #         mid in slam_mp_ids && continue
 
-            push!(slam_mp_ids, mid)
-            push!(frame_pc, Point3f0(mp.position[[1, 3, 2]]...))
-        end
-        push!(slam_mappoints, frame_pc)
-    end
+    #         push!(slam_mp_ids, mid)
+    #         push!(frame_pc, Point3f0(mp.position[[1, 3, 2]]...))
+    #     end
+    #     push!(slam_mappoints, frame_pc)
+    # end
 
-    @save mappoints_save_file slam_mappoints
-    @save positions_save_file slam_positions
+    # @save mappoints_save_file slam_mappoints
+    # @save positions_save_file slam_positions
 
     @load mappoints_save_file slam_mappoints
     @load positions_save_file slam_positions
@@ -101,7 +101,7 @@ function main(n_frames::Int)
         frame = rotr90(load(joinpath(frames_dir, "frame-$i.png")))
         image[] = copy!(image[], frame)
 
-        radius = 10
+        radius = 12.5
         xlims!(visualizer.pc_axis,
             (-radius + camera_pos[1], radius + camera_pos[1]))
         ylims!(visualizer.pc_axis,
