@@ -50,8 +50,6 @@ Base.@kwdef mutable struct Params
     """
     Whether to do P3P for pose estimation
     or doing only Bundle Adjustment for pose.
-
-    TODO: right now it is always performed, since there is no BA yet.
     """
     do_p3p::Bool = true
     """

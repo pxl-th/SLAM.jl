@@ -27,14 +27,16 @@ function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
 end
 
 function track!(fe::FrontEnd, image, time)
-    is_kf_required = track_mono!(fe, image, time)
-    display(fe.current_frame.wc); println()
+    lock(fe.map_manager.map_lock) do
+        is_kf_required = track_mono!(fe, image, time)
+        display(fe.current_frame.wc); println()
 
-    if is_kf_required
-        create_keyframe!(fe.map_manager, image)
-        fe.keyframe_pyramid = fe.current_pyramid
+        if is_kf_required
+            create_keyframe!(fe.map_manager, image)
+            fe.keyframe_pyramid = fe.current_pyramid
+        end
+        is_kf_required
     end
-    is_kf_required
 end
 
 function track_mono!(fe::FrontEnd, image, time)::Bool
@@ -63,6 +65,7 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
             return false
         end
     end
+
     compute_pose!(fe)
     # Update motion model from estimated pose.
     update!(fe.motion_model, fe.current_frame.wc, time)
@@ -74,7 +77,7 @@ Compute pose of a current Frame using P3P Ransac algorithm.
 """
 function compute_pose!(fe::FrontEnd)
     if fe.current_frame.nb_3d_kpts < 5
-        @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts) but $n3d."
+        @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts)."
         return
     end
 
@@ -91,7 +94,6 @@ function compute_pose!(fe::FrontEnd)
 
         mp = fe.map_manager.map_points[kp.id]
         do_p3p && push!(p3p_pdn_positions, normalize(kp.position))
-        # TODO do_p3p &&
         # Convert pixel to `(x, y)` format, expected by P3P.
         push!(p3p_pixels, kp.undistorted_pixel[[2, 1]])
         push!(p3p_3d_points, mp.position)
@@ -196,7 +198,7 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
             "to compute 5pt Essential Matrix."
         return false
     end
-    n_inliers, (E, P, inliers, repr_error) = five_point_ransac(
+    n_inliers, (_, P, inliers, _) = five_point_ransac(
         previous_points, current_points,
         fe.current_frame.camera.K, fe.current_frame.camera.K,
     )
@@ -293,7 +295,8 @@ function compute_parallax(
 
     frame = fe.map_manager.frames_map[current_frame_id]
     current_rotation = compensate_rotation ?
-        get_Rcw(frame) * get_Rwc(fe.current_frame) : SMatrix{3, 3, Float64}(I)
+        get_Rcw(frame) * get_Rwc(fe.current_frame) :
+        SMatrix{3, 3, Float64}(I)
 
     # Compute parallax.
     avg_parallax = 0.0
@@ -311,7 +314,7 @@ function compute_parallax(
             upx = project(frame.camera, current_rotation * keypoint.position)
         end
 
-        frame_keypoint = frame.keypoints[keypoint.id]
+        frame_keypoint = get_keypoint(frame, keypoint.id)
         parallax = norm(upx - frame_keypoint.undistorted_pixel)
         avg_parallax += parallax
         n_parallax += 1
@@ -341,7 +344,6 @@ function preprocess!(fe::FrontEnd, image)
 
     # Update previous if tracking from Frame to Frame
     # and not from KeyFrame to Frame.
-    # TODO update this, when KF->F is ready.
     fe.previous_image = fe.current_image
     fe.previous_pyramid = fe.current_pyramid
 
@@ -373,7 +375,7 @@ function klt_tracking!(fe::FrontEnd)
         # If using prior, init pixel positions using motion model.
         # Projection in `(y, x)` format.
         projection = project_world_to_image_distort(
-            fe.current_frame, fe.map_manager.map_points[kp.id].position,
+            fe.current_frame, get_position(fe.map_manager.map_points[kp.id]),
         )
         in_image(fe.current_frame.camera, projection) || continue
 
@@ -384,8 +386,6 @@ function klt_tracking!(fe::FrontEnd)
 
     # First, track 3d keypoints, if using prior.
     if fe.params.use_prior && !isempty(priors_3d)
-        # TODO allow passing displacement to tracking.
-        # TODO construct displacement from priors_3d & prior_3d_pixels.
         new_keypoints, status = fb_tracking!(
             fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
             pyramid_levels=1, window_size=fe.params.window_size,
@@ -410,20 +410,19 @@ function klt_tracking!(fe::FrontEnd)
         # without using any priors.
         if nb_good < 0.33 * length(priors_3d)
             fe.p3p_required = true
-            # TODO set displacements to 0 for the fb_tracking below.
-            # TODO aka `priors = prior_pixels`.
         end
     end
+
     # Track other prior keypoints, if any.
     isempty(priors) && return
-
     new_keypoints, status = fb_tracking!(
         fe.previous_pyramid, fe.current_pyramid, prior_pixels;
         pyramid_levels=fe.params.pyramid_levels,
         window_size=fe.params.window_size,
         max_distance=fe.params.max_ktl_distance,
     )
-    # Either update or remove current keypoints.
+
+    # Either update or remove keypoints.
     nb_good = 0
     for i in 1:length(new_keypoints)
         if status[i] && in_image(fe.current_frame.camera, new_keypoints[i])

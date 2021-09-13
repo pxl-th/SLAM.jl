@@ -250,8 +250,7 @@ function local_bundle_adjustment!(
 
     bad_keypoints = Set{Int64}() # kpid/mpid
     local_keyframes = Dict{Int64, Frame}() # kfid → Frame
-    # {mpid → {kfid → pixel}}
-    map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}()
+    map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}() # {mpid → {kfid → pixel}}
     extrinsics = Dict{Int64, NTuple{6, Float64}}() # kfid → extrinsics
     kp_ids_optimize = Set{Int64}() # kpid
 
@@ -447,9 +446,7 @@ function local_bundle_adjustment!(
 
         # MapPoint is good, update its position.
         new_position = @view(new_points[:, pid])
-        set_position!(
-            map_manager.map_points[mpid], new_position, 1.0 / new_position[3],
-        )
+        set_position!(map_manager.map_points[mpid], new_position)
     end
 
     # MapPoint culling for bad observations.

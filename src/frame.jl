@@ -69,6 +69,11 @@ mutable struct Frame
     """
     covisible_kf::Dict{Int64, Int64}
     local_map_ids::Set{Int64}
+
+    keypoints_lock::ReentrantLock
+    pose_lock::ReentrantLock
+    grid_lock::ReentrantLock
+    covisibility_lock::ReentrantLock
 end
 
 function Frame(;
@@ -85,6 +90,11 @@ function Frame(;
     cells = ceil.(Int64, image_resolution ./ cell_size)
     grid = [Set{Int64}() for _=1:cells[1], _=1:cells[2]]
 
+    keypoints_lock = ReentrantLock()
+    pose_lock = ReentrantLock()
+    grid_lock = ReentrantLock()
+    covisibility_lock = ReentrantLock()
+
     Frame(
         id, kfid, time, cw, wc,
         camera,
@@ -92,12 +102,34 @@ function Frame(;
         nb_occupied_cells, cell_size,
         nb_keypoints, 0, 0,
         Dict{Int64, Int64}(), Set{Int64}(),
+
+        keypoints_lock, pose_lock, grid_lock, covisibility_lock,
     )
 end
 
-get_keypoints(f::Frame) = f.keypoints |> values
-get_2d_keypoints(f::Frame) = [k for k in values(f.keypoints) if !k.is_3d]
-get_3d_keypoints(f::Frame) = [k for k in values(f.keypoints) if k.is_3d]
+function get_keypoints(f::Frame)
+    lock(f.keypoints_lock) do
+        f.keypoints |> values |> collect
+    end
+end
+
+function get_2d_keypoints(f::Frame)
+    lock(f.keypoints_lock) do
+        [k for k in values(f.keypoints) if !k.is_3d]
+    end
+end
+
+function get_3d_keypoints(f::Frame)
+    lock(f.keypoints_lock) do
+        [k for k in values(f.keypoints) if k.is_3d]
+    end
+end
+
+function get_keypoint(f::Frame, kpid)
+    lock(f.keypoints_lock) do
+        kpid in keys(f.keypoints) ? f.keypoints[kpid] : nothing
+    end
+end
 
 function add_keypoint!(
     f::Frame, point::Point2f, id::Int64;
@@ -110,33 +142,37 @@ function add_keypoint!(
 end
 
 function add_keypoint!(f::Frame, keypoint::Keypoint)
-    if keypoint.id in keys(f.keypoints)
-        @warn "[Frame] $(f.id) already has keypoint $(keypoint.id). Skipping."
-        return
-    end
+    lock(f.keypoints_lock) do
+        if keypoint.id in keys(f.keypoints)
+            @warn "[Frame] $(f.id) already has keypoint $(keypoint.id)."
+            return
+        end
 
-    f.keypoints[keypoint.id] = keypoint
-    add_keypoint_to_grid!(f, keypoint)
+        f.keypoints[keypoint.id] = keypoint
+        add_keypoint_to_grid!(f, keypoint)
 
-    f.nb_keypoints += 1
-    if keypoint.is_3d
-        f.nb_3d_kpts += 1
-    else
-        f.nb_2d_kpts += 1
+        f.nb_keypoints += 1
+        if keypoint.is_3d
+            f.nb_3d_kpts += 1
+        else
+            f.nb_2d_kpts += 1
+        end
     end
 end
 
-function update_keypoint!(f::Frame, id::Int64, point)
-    ckp = get(f.keypoints, id, Keypoint(Val(:invalid)))
-    is_valid(ckp) || return
+function update_keypoint!(f::Frame, kpid, point)
+    lock(f.keypoints_lock) do
+        kpid in keys(f.keypoints) || return
 
-    kp = ckp |> deepcopy
-    kp.pixel = point
-    kp.undistorted_pixel = undistort_point(f.camera, kp.pixel)
-    kp.position = backproject(f.camera, kp.undistorted_pixel)
+        ckp = f.keypoints[kpid]
+        kp = ckp |> deepcopy
+        kp.pixel = point
+        kp.undistorted_pixel = undistort_point(f.camera, kp.pixel)
+        kp.position = backproject(f.camera, kp.undistorted_pixel)
 
-    update_keypoint_in_grid!(f, ckp, kp)
-    f.keypoints[id] = kp
+        update_keypoint_in_grid!(f, ckp, kp)
+        f.keypoints[kpid] = kp
+    end
 end
 
 function update_keypoint_in_grid!(
@@ -152,62 +188,101 @@ function update_keypoint_in_grid!(
 end
 
 function add_keypoint_to_grid!(f::Frame, keypoint::Keypoint)
-    kpi = to_cartesian(keypoint.pixel, f.cell_size)
-    isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells += 1;)
-    push!(f.keypoints_grid[kpi], keypoint.id)
-end
-
-function remove_keypoint!(f::Frame, id::Int64)
-    kp = get(f.keypoints, id, Keypoint(Val(:invalid)))
-    is_valid(kp) || return
-
-    pop!(f.keypoints, id)
-    remove_keypoint_from_grid!(f, kp)
-
-    f.nb_keypoints -= 1
-    if kp.is_3d
-        f.nb_3d_kpts -= 1
-    else
-        f.nb_2d_kpts -= 1
+    lock(f.grid_lock) do
+        kpi = to_cartesian(keypoint.pixel, f.cell_size)
+        isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells += 1;)
+        push!(f.keypoints_grid[kpi], keypoint.id)
     end
 end
 
 function remove_keypoint_from_grid!(f::Frame, keypoint::Keypoint)
-    kpi = to_cartesian(keypoint.pixel, f.cell_size)
-    if keypoint.id in f.keypoints_grid[kpi]
-        pop!(f.keypoints_grid[kpi], keypoint.id)
-        isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells -= 1)
+    lock(f.grid_lock) do
+        kpi = to_cartesian(keypoint.pixel, f.cell_size)
+        if keypoint.id in f.keypoints_grid[kpi]
+            pop!(f.keypoints_grid[kpi], keypoint.id)
+            isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells -= 1)
+        end
+    end
+end
+
+function remove_keypoint!(f::Frame, kpid)
+    lock(f.keypoints_lock) do
+        kpid in keys(f.keypoints) || return
+
+        kp = f.keypoints[kpid]
+        pop!(f.keypoints, kpid)
+        remove_keypoint_from_grid!(f, kp)
+
+        f.nb_keypoints -= 1
+        if kp.is_3d
+            f.nb_3d_kpts -= 1
+        else
+            f.nb_2d_kpts -= 1
+        end
     end
 end
 
 function set_wc!(f::Frame, wc)
-    f.wc = wc
-    f.cw = inv(SE3, wc)
+    lock(f.pose_lock) do
+        f.wc = wc
+        f.cw = inv(SE3, wc)
+    end
 end
 
 function set_cw!(f::Frame, cw)
-    f.cw = cw
-    f.wc = inv(SE3, cw)
+    lock(f.pose_lock) do
+        f.cw = cw
+        f.wc = inv(SE3, cw)
+    end
 end
 
-get_Rwc(f::Frame) = f.wc[1:3, 1:3]
-get_Rcw(f::Frame) = f.cw[1:3, 1:3]
-get_twc(f::Frame) = f.wc[1:3, 4]
-get_tcw(f::Frame) = f.cw[1:3, 4]
+function get_Rwc(f::Frame)
+    lock(f.pose_lock) do
+        f.wc[1:3, 1:3]
+    end
+end
+
+function get_Rcw(f::Frame)
+    lock(f.pose_lock) do
+        f.cw[1:3, 1:3]
+    end
+end
+
+function get_twc(f::Frame)
+    lock(f.pose_lock) do
+        f.wc[1:3, 4]
+    end
+end
+
+function get_tcw(f::Frame)
+    lock(f.pose_lock) do
+        f.cw[1:3, 4]
+    end
+end
 
 function get_cw_ba(f::Frame)
-    r = RotZYX(f.cw[1:3, 1:3])
-    (r.theta1, r.theta2, r.theta3, f.cw[1:3, 4]...)
+    lock(f.pose_lock) do
+        r = RotZYX(f.cw[1:3, 1:3])
+        (r.theta1, r.theta2, r.theta3, f.cw[1:3, 4]...)
+    end
 end
 
-set_cw_ba!(f::Frame, θ) = set_cw!(f, to_4x4(RotZYX(θ[1:3]...), θ[4:6]))
+function set_cw_ba!(f::Frame, θ)
+    lock(f.pose_lock) do
+        set_cw!(f, to_4x4(RotZYX(θ[1:3]...), θ[4:6]))
+    end
+end
 
 function project_camera_to_world(f::Frame, point)
-    f.wc * to_homogeneous(point)
+    lock(f.pose_lock) do
+        f.wc * to_homogeneous(point)
+    end
 end
 
 function project_world_to_camera(f::Frame, point)
-    f.cw * to_homogeneous(point)
+    lock(f.pose_lock) do
+        f.cw * to_homogeneous(point)
+    end
 end
 
 function project_world_to_image(f::Frame, point)
@@ -218,32 +293,52 @@ function project_world_to_image_distort(f::Frame, point)
     project_undistort(f.camera, project_world_to_camera(f, point))
 end
 
-function decrease_covisible_kf!(f::Frame, kfid)
-    kfid == f.kfid && return
+function turn_keypoint_3d!(f::Frame, id)
+    lock(f.keypoints_lock) do
+        id in keys(f.keypoints) || return
+        kp = f.keypoints[id]
+        kp.is_3d && return
 
-    kfid in keys(f.covisible_kf) || return
-    f.covisible_kf[kfid] == 0 && return
-    f.covisible_kf[kfid] -= 1
-    f.covisible_kf[kfid] == 0 && pop!(f.covisible_kf, kfid)
+        kp.is_3d = true
+        f.nb_2d_kpts -= 1
+        f.nb_3d_kpts += 1
+    end
 end
 
-function turn_keypoint_3d!(f::Frame, id)
-    id in keys(f.keypoints) || return
+function get_covisibile_map(f::Frame)
+    lock(f.covisibility_lock) do
+        f.covisible_kf
+    end
+end
 
-    kp = f.keypoints[id]
-    kp.is_3d && return
+function set_covisible_map(f::Frame, covisible_map)
+    lock(f.covisibility_lock) do
+        f.covisible_kf = covisible_map
+    end
+end
 
-    kp.is_3d = true
-    f.nb_2d_kpts -= 1
-    f.nb_3d_kpts += 1
+function decrease_covisible_kf!(f::Frame, kfid)
+    lock(f.covisibility_lock) do
+        kfid == f.kfid && return
+        kfid in keys(f.covisible_kf) || return
+        f.covisible_kf[kfid] == 0 && return
+        f.covisible_kf[kfid] -= 1
+        f.covisible_kf[kfid] == 0 && pop!(f.covisible_kf, kfid)
+    end
 end
 
 function remove_covisible_kf!(f::Frame, kfid)
     kfid == f.kfid && return
-    kfid in keys(f.covisible_kf) && pop!(f.covisible_kf, kfid)
+    lock(f.covisibility_lock) do
+        kfid in keys(f.covisible_kf) && pop!(f.covisible_kf, kfid)
+    end
 end
 
 function reset!(f::Frame)
+    lock(f.keypoints_lock)
+    lock(f.pose_lock)
+    lock(f.grid_lock)
+
     f.nb_2d_kpts = 0
     f.nb_3d_kpts = 0
     f.nb_keypoints = 0
@@ -256,4 +351,8 @@ function reset!(f::Frame)
 
     f.wc = SMatrix{4, 4, Float64}(I)
     f.cw = SMatrix{4, 4, Float64}(I)
+
+    unlock(f.grid_lock)
+    unlock(f.pose_lock)
+    unlock(f.keypoints_lock)
 end
