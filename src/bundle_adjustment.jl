@@ -44,9 +44,10 @@ function bundle_adjustment(
     pixels::Matrix{Float64},
     points_ids, extrinsic_ids;
     constant_extrinsics::Union{Nothing, Vector{Bool}} = nothing,
-    iterations::Int = 10, show_trace::Bool = false,
-    depth_ϵ::Real = 1e-6, repr_ϵ::Real = 5.0,
+    iterations = 10, show_trace::Bool = false, repr_ϵ = 5.0,
 )
+    depth_ϵ = 1e-6
+
     check_constants = constant_extrinsics ≢ nothing
     fx, fy = camera.fx, camera.fy
     cx, cy = camera.cx, camera.cy
@@ -125,8 +126,7 @@ function bundle_adjustment(
     J_sparsity, g! = compute_jacobian_sparsity!()
     outliers_result = optimize!(
         LeastSquaresProblem(X0, Y, residue!, J_sparsity, g!),
-        LevenbergMarquardt(LeastSquaresOptim.LSMR());
-        iterations=5, show_trace,
+        LevenbergMarquardt(LeastSquaresOptim.LSMR()); iterations=5, show_trace,
     )
     outliers_minimizer = outliers_result.minimizer
 
@@ -151,8 +151,7 @@ function bundle_adjustment(
     J_sparsity, g! = compute_jacobian_sparsity!()
     result = optimize!(
         LeastSquaresProblem(outliers_minimizer, Y, residue!, J_sparsity, g!),
-        LevenbergMarquardt(LeastSquaresOptim.LSMR());
-        iterations, show_trace,
+        LevenbergMarquardt(LeastSquaresOptim.LSMR()); iterations, show_trace,
     )
 
     new_extrinsics = reshape(

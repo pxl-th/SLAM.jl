@@ -12,9 +12,7 @@ mutable struct Keypoint
     Position of a keypoint in 3D space in `(x, y, z = 1)` format.
     """
     position::Point3f
-
     descriptor::BitVector
-    # is_retracked::Bool
     is_3d::Bool
 end
 
@@ -108,25 +106,32 @@ end
 
 function get_keypoints(f::Frame)
     lock(f.keypoints_lock) do
-        f.keypoints |> values |> collect
+        [deepcopy(kp) for kp in values(f.keypoints)]
     end
 end
 
 function get_2d_keypoints(f::Frame)
     lock(f.keypoints_lock) do
-        [k for k in values(f.keypoints) if !k.is_3d]
+        [deepcopy(k) for k in values(f.keypoints) if !k.is_3d]
     end
 end
 
 function get_3d_keypoints(f::Frame)
     lock(f.keypoints_lock) do
-        [k for k in values(f.keypoints) if k.is_3d]
+        [deepcopy(k) for k in values(f.keypoints) if k.is_3d]
     end
 end
 
 function get_keypoint(f::Frame, kpid)
     lock(f.keypoints_lock) do
-        kpid in keys(f.keypoints) ? f.keypoints[kpid] : nothing
+        kpid in keys(f.keypoints) ? deepcopy(f.keypoints[kpid]) : nothing
+    end
+end
+
+function get_keypoint_unpx(f::Frame, kpid)
+    lock(f.keypoints_lock) do
+        kpid in keys(f.keypoints) ?
+            f.keypoints[kpid].undistorted_pixel : nothing
     end
 end
 
@@ -259,7 +264,7 @@ function get_tcw(f::Frame)
     end
 end
 
-function get_cw_ba(f::Frame)
+function get_cw_ba(f::Frame)::NTuple{6, Float64}
     lock(f.pose_lock) do
         r = RotZYX(f.cw[1:3, 1:3])
         (r.theta1, r.theta2, r.theta3, f.cw[1:3, 4]...)
@@ -306,7 +311,7 @@ end
 
 function get_covisible_map(f::Frame)
     lock(f.covisibility_lock) do
-        f.covisible_kf
+        deepcopy(f.covisible_kf)
     end
 end
 

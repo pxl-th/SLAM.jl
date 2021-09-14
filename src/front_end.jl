@@ -111,7 +111,6 @@ function compute_pose!(fe::FrontEnd)
             fe |> reset_frame!
             return
         end
-        @debug "[FE] P3P $(n_inliers)/$(length(p3p_pixels)) inliers"
         KP, inliers, error = model
         set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP))
 
@@ -133,9 +132,8 @@ function compute_pose!(fe::FrontEnd)
 
     new_T, init_error, res_error, outliers, n_outliers = pnp_bundle_adjustment(
         fe.current_frame.camera, fe.current_frame.cw,
-        ba_pixels, p3p_3d_points; iterations=10, show_trace=true,
+        ba_pixels, p3p_3d_points; iterations=10,
     )
-    @debug "[FE] BA Pose: outliers $n_outliers, $init_error → $res_error."
     if length(p3p_3d_points) - n_outliers < 5 || res_error > init_error
         fe.p3p_required = true
         return
@@ -187,14 +185,14 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
     end
 
     if n_parallax < 8
-        @debug "[Front-End] Not enough keypoints in previous KF " *
+        @warn "[Front-End] Not enough keypoints in previous KF " *
             "to compute 5pt Essential Matrix."
         return false
     end
 
     avg_parallax /= n_parallax
     if (avg_parallax < min_parallax)
-        @debug "[Front-End] Not enough parallax ($avg_parallax) " *
+        @warn "[Front-End] Not enough parallax ($avg_parallax) " *
             "to compute 5pt Essential Matrix."
         return false
     end
@@ -203,7 +201,7 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
         fe.current_frame.camera.K, fe.current_frame.camera.K,
     )
     if n_inliers < 5
-        @debug "[Front-End] Not enough inliers ($n_inliers) for the " *
+        @warn "[Front-End] Not enough inliers ($n_inliers) for the " *
             "5pt Essential Matrix."
         return false
     end
@@ -246,7 +244,6 @@ function check_new_kf_required(fe::FrontEnd)::Bool
 
     # Id difference since last KeyFrame.
     frames_δ = fe.current_frame.id - prev_kf.id
-    @debug "[FE] Check new KF $(fe.current_frame.nb_3d_kpts) 3dkp, δ $frames_δ"
     fe.current_frame.nb_occupied_cells < 0.33 * fe.params.max_nb_keypoints &&
         frames_δ ≥ 5 && return true # TODO && !params.localba_is_on
     fe.current_frame.nb_3d_kpts < 20 && frames_δ ≥ 2 && return true
@@ -288,7 +285,7 @@ function compute_parallax(
     only_2d::Bool = true, median_parallax::Bool = true,
 )
     if !(current_frame_id in keys(fe.map_manager.frames_map))
-        @debug "[Front-End] Error in `compute_parallax`! " *
+        @warn "[Front-End] Error in `compute_parallax`! " *
             "Keyframe $current_frame_id does not exist."
         return 0.0
     end
@@ -314,8 +311,7 @@ function compute_parallax(
             upx = project(frame.camera, current_rotation * keypoint.position)
         end
 
-        frame_keypoint = get_keypoint(frame, keypoint.id)
-        parallax = norm(upx - frame_keypoint.undistorted_pixel)
+        parallax = norm(upx - get_keypoint_unpx(frame, keypoint.id))
         avg_parallax += parallax
         n_parallax += 1
 
@@ -432,7 +428,6 @@ function klt_tracking!(fe::FrontEnd)
             remove_obs_from_current_frame!(fe.map_manager, prior_ids[i])
         end
     end
-    @debug "[FE] KLT $(nb_good)/$(length(new_keypoints)) inliers"
 end
 
 function reset_frame!(fe::FrontEnd)

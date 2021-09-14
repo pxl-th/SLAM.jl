@@ -66,7 +66,7 @@ end
 
 function get_observers(m::MapPoint)
     lock(m.mappoint_lock) do
-        m.observer_keyframes_ids
+        deepcopy(m.observer_keyframes_ids)
     end
 end
 
@@ -100,6 +100,7 @@ function remove_kf_observation!(m::MapPoint, kfid)
             m.descriptor_distances_map |> empty!
             return
         end
+
         # Set new anchor KeyFrame if removed previous anchor.
         kfid == m.kfid && (m.kfid = m.observer_keyframes_ids[1])
         # Find the most representative descriptor among observer KeyFrames.
@@ -114,7 +115,10 @@ function remove_kf_observation!(m::MapPoint, kfid)
             m.descriptor_distances_map[kfd] -= dist
 
             desc_distance = m.descriptor_distances_map[kfd]
-            desc_distance < mindist && (mindist = desc_distance; minid = kfd;)
+            if desc_distance < mindist
+                mindist = desc_distance
+                minid = kfd
+            end
         end
 
         pop!(m.keyframes_descriptors, kfid)

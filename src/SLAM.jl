@@ -2,8 +2,6 @@ module SLAM
 export SlamManager, add_image!, get_queue_size
 export Params, Camera, run!, to_cartesian, Visualizer
 
-import Base.Threads.@spawn
-
 using DataStructures: OrderedSet, OrderedDict
 using GLMakie
 using Images
@@ -109,7 +107,7 @@ function SlamManager(params::Params, camera::Camera)
     front_end = FrontEnd(params, frame, map_manager)
 
     mapper = Mapper(params, map_manager, frame)
-    mapper_thread = @spawn run!(mapper)
+    mapper_thread = Threads.@spawn run!(mapper)
 
     SlamManager(
         params,
@@ -145,7 +143,6 @@ end
 function run!(sm::SlamManager)
     while !(sm.exit_required)
         image, time = get_image!(sm)
-        @debug "[SM] Time $time."
         if image ≡ nothing
             @debug "[SM] No new image, waiting..."
             sleep(1)
@@ -156,7 +153,6 @@ function run!(sm::SlamManager)
         sm.current_frame.id = sm.frame_id
         sm.current_frame.time = time
         @debug "[SM] Frame $(sm.frame_id) @ $time."
-        @debug "[SM] Fid $(sm.current_frame.id), KFid $(sm.current_frame.kfid)."
 
         # Send image to the front end.
         is_kf_required = track!(sm.front_end, image, time)
@@ -168,7 +164,6 @@ function run!(sm::SlamManager)
         # Send it to the mapper queue for traingulation.
         is_kf_required || continue
 
-        @debug "[SM] Adding new KF $(sm.current_frame.kfid)."
         add_new_kf!(sm.mapper, KeyFrame(sm.current_frame.kfid, image))
     end
 

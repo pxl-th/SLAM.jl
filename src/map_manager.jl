@@ -42,6 +42,12 @@ function get_keyframe(m::MapManager, kfid)
     end
 end
 
+function has_keyframe(m::MapManager, kfid)
+    lock(m.keyframe_lock) do
+        kfid in keys(m.frames_map)
+    end
+end
+
 function get_mappoint(m::MapManager, mpid)
     lock(m.mappoint_lock) do
         mpid in keys(m.map_points) ? m.map_points[mpid] : nothing
@@ -76,24 +82,17 @@ function prepare_frame!(m::MapManager)
             n_removed += 1
         end
     end
-    @debug "[MM] Added total KF observs $n_added"
-    @debug "[MM] Removed total KF observs $n_removed"
 end
 
 function extract_keypoints!(m::MapManager, image)
     nb_2_detect = m.params.max_nb_keypoints - m.current_frame.nb_occupied_cells
-    if nb_2_detect ≤ 0
-        @debug "[MM] No need to extract more KPs"
-        return
-    end
+    nb_2_detect ≤ 0 && return
     # Detect keypoints in the provided `image`
     # using current keypoints to set a mask of regions
     # to avoid detecting features in.
     current_points = [kp.pixel for kp in values(m.current_frame.keypoints)]
-    @debug "[MM] Before extraction $(length(current_points)) keypoints"
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
-    @debug "[MM] Extracted $(length(keypoints)) keypoints"
 
     descriptors, keypoints = describe(m.extractor, image, keypoints)
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
@@ -112,10 +111,8 @@ function add_keypoints_to_frame!(
 end
 
 function add_mappoint!(m::MapManager, descriptor)
-    new_mappoint = MapPoint(
-        m.current_mappoint_id, m.current_keyframe_id, descriptor,
-    )
-    m.map_points[m.current_mappoint_id] = new_mappoint
+    mp = MapPoint(m.current_mappoint_id, m.current_keyframe_id, descriptor)
+    m.map_points[m.current_mappoint_id] = mp
     m.current_mappoint_id += 1
     m.nb_mappoints += 1
 end
@@ -194,8 +191,8 @@ function remove_keyframe!(m::MapManager, kfid)
     pop!(m.frames_map, kfid)
     m.nb_keyframes -= 1
 
-    unlock(m.keyframe_lock)
     unlock(m.mappoint_lock)
+    unlock(m.keyframe_lock)
 end
 
 """

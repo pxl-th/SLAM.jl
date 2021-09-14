@@ -1,24 +1,24 @@
 Base.@kwdef mutable struct Params
-    max_nb_keypoints::Int = 1000
+    max_nb_keypoints::Int64 = 1000
     """
     Cell size of the grid in the Frame.
     """
-    max_distance::Int = 50
+    max_distance::Int64 = 50
     """
     Maximum distance a point can shift to be considered inlier in KTL tracking.
     """
-    max_ktl_distance::Real = 1.0
+    max_ktl_distance::Float64 = 1.0
     """
     Number of pyramid levels to construct.
     0 to use original image only.
     Otherwise, total number of levels is L + 1.
     """
-    pyramid_levels::Int = 3
+    pyramid_levels::Int64 = 3
     """
     Size of the window for the KTL tracking.
     Actual size is `2 * S + 1`.
     """
-    window_size::Int = 31
+    window_size::Int64 = 31
     """
     Use prior motion model to estimate subsequent position of keypoints
     in the next frame.
@@ -41,12 +41,12 @@ Base.@kwdef mutable struct Params
     """
     Amount of parallax (in pixels) needed for initialization system to kick in.
     """
-    initial_parallax::Real = 20.0
+    initial_parallax::Float64 = 20.0
     """
     Maximum allowed reprojection error.
     Used during triangulation in Mapper to discard outliers.
     """
-    max_reprojection_error::Real = 3.0
+    max_reprojection_error::Float64 = 3.0
     """
     Whether to do P3P for pose estimation
     or doing only Bundle Adjustment for pose.
@@ -55,12 +55,12 @@ Base.@kwdef mutable struct Params
     """
     Minimum number of 3D MapPoints required to perform Bundle-Adjustment.
     """
-    min_cov_score::Int = 25
+    min_cov_score::Int64 = 25
     """
     Number of good keypoints divided by the total number of keypoints in a Frame.
     This is used to filter out non-informative Frames.
     """
-    filtering_ratio::Real = 0.9
+    filtering_ratio::Float64 = 0.9
 end
 
 function reset!(p::Params)

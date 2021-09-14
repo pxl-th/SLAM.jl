@@ -1,5 +1,3 @@
-import Base.Threads.@spawn
-
 using BSON: @save, @load
 using GeometryBasics
 using GLMakie
@@ -9,15 +7,15 @@ include("kitty.jl")
 
 function main(n_frames::Int)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "04"
+    sequence = "00"
     dataset = KittyDataset(base_dir, sequence)
     println(dataset)
 
-    save_dir = joinpath("/home/pxl-th/projects", "kitty-$sequence")
+    save_dir = joinpath("/home/pxl-th/projects", "2-kitty-$sequence")
     frames_dir = joinpath(save_dir, "frames")
     isdir(save_dir) || mkdir(save_dir)
     isdir(frames_dir) || mkdir(frames_dir)
-    println("Save directory: $save_dir")
+    @info "Save directory: $save_dir"
 
     mappoints_save_file = joinpath(save_dir, "mappoints.bson")
     positions_save_file = joinpath(save_dir, "positions.bson")
@@ -31,29 +29,33 @@ function main(n_frames::Int)
         0, 0, 0, 0,
         height, width,
     )
-    params = Params(;window_size=9)
+    params = Params(;window_size=31, max_distance=50)
     slam_manager = SlamManager(params, camera)
+    slam_manager_thread = Threads.@spawn run!(slam_manager)
 
-    println("SLAM initialized.")
-    slam_manager_thread = @spawn run!(slam_manager)
-    println("SLAM started.")
+    t1 = time()
 
     for i in 1:n_frames
-        println("Frame N $i.")
         timestamp = dataset.timestamps[i]
         frame = dataset[i] .|> Gray{Float64}
-
         add_image!(slam_manager, frame, timestamp)
 
         q_size = get_queue_size(slam_manager)
-        while q_size > 5
-            sleep(1)
+        f_size = length(slam_manager.mapper.estimator.frame_queue)
+        while q_size > 1 || f_size > 1
+            sleep(0.1)
             q_size = get_queue_size(slam_manager)
+            f_size = length(slam_manager.mapper.estimator.frame_queue)
         end
+
+        sleep(1e-3)
     end
 
     slam_manager.exit_required = true
     wait(slam_manager_thread)
+
+    t2 = time()
+    @info "SLAM took: $(t2 - t1) seconds."
 
     # Visualize result.
     map_manager = slam_manager.map_manager
@@ -95,7 +97,7 @@ function main(n_frames::Int)
     )
     meshscatter!(
         visualizer.pc_axis, slam_mappoints;
-        color=:black, markersize=0.02, quality=8,
+        color=:black, markersize=0.05, quality=8,
     )
 
     image!(visualizer.image_axis, image)
