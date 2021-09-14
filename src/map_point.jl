@@ -70,6 +70,12 @@ function get_observers(m::MapPoint)
     end
 end
 
+function get_observers_number(m::MapPoint)
+    lock(m.mappoint_lock) do
+        length(m.observer_keyframes_ids)
+    end
+end
+
 function get_position(m::MapPoint)
     lock(m.mappoint_lock) do
         m.position

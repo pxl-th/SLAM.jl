@@ -20,6 +20,17 @@ using StaticArrays
 using SparseArrays
 using SparseDiffTools
 
+macro my_async(ex)
+    quote
+        @async try
+            $(esc(ex))
+        catch e
+            println("In task:")
+            @error(exception = (e, catch_backtrace()))
+        end
+    end
+end
+
 const Point2 = SVector{2}
 const Point2i = SVector{2, Int64}
 const Point2f = SVector{2, Float64}
@@ -65,6 +76,7 @@ include("motion_model.jl")
 include("map_point.jl")
 include("map_manager.jl")
 include("front_end.jl")
+include("estimator.jl")
 include("mapper.jl")
 include("visualizer.jl")
 include("bundle_adjustment.jl")
@@ -86,6 +98,7 @@ mutable struct SlamManager
     camera::Camera
     exit_required::Bool
 
+    mapper_thread
     image_lock::ReentrantLock
 end
 
@@ -107,13 +120,13 @@ function SlamManager(params::Params, camera::Camera)
     front_end = FrontEnd(params, frame, map_manager)
 
     mapper = Mapper(params, map_manager, frame)
-    @spawn run!(mapper)
+    mapper_thread = @spawn run!(mapper)
 
     SlamManager(
         params,
         image_queue, time_queue, frame, frame.id,
         front_end, map_manager, mapper, extractor,
-        camera, false, ReentrantLock(),
+        camera, false, mapper_thread, ReentrantLock(),
     )
 end
 
@@ -171,6 +184,7 @@ function run!(sm::SlamManager)
     end
 
     sm.mapper.exit_required = true
+    wait(sm.mapper_thread)
     @debug "[SM] Exit required."
 end
 

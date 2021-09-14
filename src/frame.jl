@@ -102,7 +102,6 @@ function Frame(;
         nb_occupied_cells, cell_size,
         nb_keypoints, 0, 0,
         Dict{Int64, Int64}(), Set{Int64}(),
-
         keypoints_lock, pose_lock, grid_lock, covisibility_lock,
     )
 end
@@ -305,15 +304,21 @@ function turn_keypoint_3d!(f::Frame, id)
     end
 end
 
-function get_covisibile_map(f::Frame)
+function get_covisible_map(f::Frame)
     lock(f.covisibility_lock) do
         f.covisible_kf
     end
 end
 
-function set_covisible_map(f::Frame, covisible_map)
+function set_covisible_map!(f::Frame, covisible_map)
     lock(f.covisibility_lock) do
         f.covisible_kf = covisible_map
+    end
+end
+
+function add_covisibility!(f::Frame, kfid, cov_score)
+    lock(f.covisibility_lock) do
+        f.covisible_kf[kfid] = cov_score
     end
 end
 
@@ -335,6 +340,7 @@ function remove_covisible_kf!(f::Frame, kfid)
 end
 
 function reset!(f::Frame)
+    lock(f.covisibility_lock)
     lock(f.keypoints_lock)
     lock(f.pose_lock)
     lock(f.grid_lock)
@@ -355,4 +361,5 @@ function reset!(f::Frame)
     unlock(f.grid_lock)
     unlock(f.pose_lock)
     unlock(f.keypoints_lock)
+    unlock(f.covisibility_lock)
 end

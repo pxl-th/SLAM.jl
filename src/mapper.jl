@@ -6,6 +6,7 @@ end
 mutable struct Mapper
     params::Params
     map_manager::MapManager
+    estimator::Estimator
 
     current_frame::Frame
     keyframe_queue::Vector{KeyFrame}
@@ -13,28 +14,36 @@ mutable struct Mapper
     exit_required::Bool
     new_kf_available::Bool
 
+    estimator_thread
     queue_lock::ReentrantLock
 end
 
 function Mapper(params::Params, map_manager::MapManager, frame::Frame)
-    queue_lock = ReentrantLock()
-    Mapper(params, map_manager, frame, KeyFrame[], false, false, queue_lock)
+    estimator = Estimator(map_manager, params)
+    estimator_thread = @spawn run!(estimator)
+    @debug "[MP] Launched estimator."
+
+    Mapper(
+        params, map_manager, estimator,
+        frame, KeyFrame[], false, false,
+        estimator_thread, ReentrantLock(),
+    )
 end
 
 function run!(mapper::Mapper)
-    while !(mapper.exit_required)
+    while !mapper.exit_required
         succ, kf = get_new_kf!(mapper)
         if !succ
-            @debug "[Mapper] No new Keyframe to process."
+            # @debug "[MP] No new Keyframe to process."
             sleep(1)
             continue
         end
 
-        @debug "[Mapper] New keyframe to process: $(kf.id) id."
-        new_keyframe = mapper.map_manager.frames_map[kf.id]
-        # Triangulate temporal.
+        @debug "[MP] New keyframe to process: $(kf.id) id."
+        new_keyframe = get_keyframe(mapper.map_manager, kf.id)
+
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
-            @debug "[Mapper] Temporal triangulation. Before triangulation:"
+            @debug "[MP] Temporal triangulation. Before triangulation:"
             @debug "\t 2d $(new_keyframe.nb_2d_kpts), " *
                 "3d $(new_keyframe.nb_3d_kpts), " *
                 "3d total $(mapper.current_frame.nb_3d_kpts)"
@@ -43,7 +52,7 @@ function run!(mapper::Mapper)
                 triangulate_temporal!(mapper, new_keyframe)
             end
 
-            @debug "[Mapper] After triangulation:"
+            @debug "[MP] After triangulation:"
             @debug "\t 2d $(new_keyframe.nb_2d_kpts), " *
                 "3d $(new_keyframe.nb_3d_kpts), " *
                 "3d total $(mapper.current_frame.nb_3d_kpts)"
@@ -52,12 +61,12 @@ function run!(mapper::Mapper)
         # Check if reset is required.
         if mapper.params.vision_initialized
             if kf.id == 1 && new_keyframe.nb_3d_kpts < 30
-                @debug "[Mapper] Bad initialization detected. Resetting!"
+                @debug "[MP] Bad initialization detected. Resetting!"
                 mapper.params.reset_required = true
                 mapper |> reset!
                 continue
             elseif kf.id < 10 && new_keyframe.nb_3d_kpts < 3
-                @debug "[Mapper] Reset required. Nb 3D points: $(new_keyframe.nb_3d_kpts)."
+                @debug "[MP] Reset required. Nb 3D points: $(new_keyframe.nb_3d_kpts)."
                 mapper.params.reset_required = true
                 mapper |> reset!
                 continue
@@ -67,71 +76,20 @@ function run!(mapper::Mapper)
         update_frame_covisibility!(mapper.map_manager, new_keyframe)
 
         # TODO match to local map
-        # Send new KF to estimator for bundle adjustment
-        local_bundle_adjustment!(mapper.map_manager, new_keyframe, mapper.params)
-        map_filtering!(mapper.map_manager, new_keyframe, mapper.params)
+        # Send new KF to estimator for bundle adjustment.
+        @debug "[MP] Sending new Keyframe to Estimator."
+        add_new_kf!(mapper.estimator, new_keyframe)
         # TODO send new KF to loop closer
     end
-    @debug "[Mapper] Mapper is stopping: exit required."
-    # TODO estimator exit required
-end
-
-"""
-Filter out KeyFrames that share too many MapPoints with other KeyFrames
-in the covisibility graph. Since they are not informative.
-"""
-function map_filtering!(map_manager::MapManager, new_keyframe::Frame, params)
-    params.filtering_ratio ≥ 1 && return
-    new_keyframe.kfid < 20 && return
-
-    n_removed = 0
-    for kfid in keys(new_keyframe.covisible_kf)
-        # TODO if new kf is available → break
-        kfid == 0 && break
-        kfid ≥ new_keyframe.kfid && continue
-
-        if !(kfid in keys(map_manager.frames_map))
-            remove_covisible_kf!(new_keyframe, kfid)
-            continue
-        end
-
-        kf = map_manager.frames_map[kfid]
-        if kf.nb_3d_kpts < params.min_cov_score ÷ 2
-            remove_keyframe!(map_manager, kfid)
-            @debug "[MF] Removed KeyFrame $kfid."
-            n_removed += 1
-            continue
-        end
-
-        n_good, n_total = 0, 0
-        for kp in get_3d_keypoints(kf)
-            if !(kp.id in keys(map_manager.map_points))
-                remove_mappoint_obs!(kp.id, kfid)
-                continue
-            end
-            mp = map_manager.map_points[kp.id]
-            is_bad!(mp) && continue
-
-            length(mp.observer_keyframes_ids) > 4 && (n_good += 1;)
-            n_total += 1;
-            # TODO if new kf is available → break
-        end
-
-        ratio = n_good / n_total
-        if ratio > params.filtering_ratio
-            remove_keyframe!(map_manager, kfid)
-            @debug "[MF] Removed KeyFrame $kfid."
-            n_removed += 1
-        end
-    end
-
-    @debug "[MF] Removed $n_removed KeyFrames."
+    mapper.estimator.exit_required = true
+    @debug "[MP] Exit required."
+    wait(mapper.estimator_thread)
 end
 
 function triangulate_temporal!(mapper::Mapper, frame::Frame)
-    keypoints = frame |> get_2d_keypoints
+    keypoints = get_2d_keypoints(frame)
     if isempty(keypoints)
-        @debug "[Mapper] No 2D keypoints to triangulate."
+        @debug "[MP] No 2D keypoints to triangulate."
         return
     end
     K = to_4x4(frame.camera.K)
@@ -225,7 +183,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         update_mappoint!(mapper.map_manager, kp.id, wpt)
         good += 1
     end
-    @debug "[Mapper] Temporal triangulation: $good/$candidates good KeyPoints."
+    @debug "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
 end
 
 function get_new_kf!(mapper::Mapper)
@@ -235,7 +193,7 @@ function get_new_kf!(mapper::Mapper)
             return false, nothing
         end
 
-        keyframe = mapper.keyframe_queue |> popfirst!
+        keyframe = popfirst!(mapper.keyframe_queue)
         mapper.new_kf_available = !isempty(mapper.keyframe_queue)
         true, keyframe
     end
