@@ -1,13 +1,15 @@
+import Base.Threads.@spawn
+
+using BSON: @save, @load
+using GeometryBasics
 using GLMakie
 using SLAM
-using GeometryBasics
-using BSON: @save, @load
 
 include("kitty.jl")
 
 function main(n_frames::Int)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "00"
+    sequence = "04"
     dataset = KittyDataset(base_dir, sequence)
     println(dataset)
 
@@ -22,61 +24,77 @@ function main(n_frames::Int)
 
     fx, fy = dataset.K[1, 1], dataset.K[2, 2]
     cx, cy = dataset.K[1:2, 3]
-    height, width = 376, 1241
+    # height, width = 376, 1241
+    height, width = 370, 1226
     camera = SLAM.Camera(
         fx, fy, cx, cy,
         0, 0, 0, 0,
         height, width,
     )
-    params = Params()
-    # slam_manager = SlamManager(params, camera)
-    # base_position = SVector{4, Float64}(0, 0, 0, 1)
+    params = Params(;window_size=9)
+    slam_manager = SlamManager(params, camera)
 
-    # slam_positions = Point3f0[]
-    # slam_mappoints = Vector{Point3f0}[]
-    # slam_mp_ids = Set{Int64}()
+    println("SLAM initialized.")
+    slam_manager_thread = @spawn run!(slam_manager)
+    println("SLAM started.")
 
-    # for i in 1:n_frames
-    #     timestamp = dataset.timestamps[i]
-    #     frame = dataset[i] .|> Gray{Float64}
-    #     run!(slam_manager, frame, timestamp)
+    for i in 1:n_frames
+        println("Frame N $i.")
+        timestamp = dataset.timestamps[i]
+        frame = dataset[i] .|> Gray{Float64}
 
-    #     vframe = SLAM.draw_keypoints!(
-    #         RGB{Float64}.(frame), slam_manager.current_frame,
-    #     )
-    #     save(joinpath(frames_dir, "frame-$i.png"), vframe)
+        add_image!(slam_manager, frame, timestamp)
 
-    #     position = Point3f0((slam_manager.current_frame.wc * base_position)[1:3])
-    #     push!(slam_positions, position[[1, 3, 2]])
+        q_size = get_queue_size(slam_manager)
+        while q_size > 5
+            sleep(1)
+            q_size = get_queue_size(slam_manager)
+        end
+    end
 
-    #     frame_pc = Point3f0[]
-    #     for (mid, mp) in slam_manager.map_manager.map_points
-    #         mp.is_3d || continue
-    #         mid in slam_mp_ids && continue
+    slam_manager.exit_required = true
+    wait(slam_manager_thread)
 
-    #         push!(slam_mp_ids, mid)
-    #         push!(frame_pc, Point3f0(mp.position[[1, 3, 2]]...))
-    #     end
-    #     push!(slam_mappoints, frame_pc)
-    # end
+    # Visualize result.
+    map_manager = slam_manager.map_manager
+    kfids = sort!(collect(keys(map_manager.frames_map)))
 
-    # @save mappoints_save_file slam_mappoints
-    # @save positions_save_file slam_positions
+    min_bound = Point3f0(maxintfloat())
+    max_bound = Point3f(-maxintfloat())
+
+    base_position = SVector{4, Float64}(0, 0, 0, 1)
+    slam_mappoints = Vector{Point3f0}[]
+    slam_positions = Point3f0[]
+
+    for kfid in kfids
+        position = (map_manager.frames_map[kfid].wc * base_position)[1:3]
+        position = Point3f0(position[[1, 3, 2]])
+        push!(slam_positions, position)
+
+        min_bound = min.(min_bound, position)
+        max_bound = max.(max_bound, position)
+    end
+    slam_mappoints = [
+        Point3f0(m.position[[1, 3, 2]])
+        for m in values(map_manager.map_points)
+        if m.is_3d
+    ]
+
+    @save mappoints_save_file slam_mappoints
+    @save positions_save_file slam_positions
 
     @load mappoints_save_file slam_mappoints
     @load positions_save_file slam_positions
 
     visualizer = Visualizer((height, width))
-    vpc = Observable(Point3f0[])
-    vpositions = Observable(Point3f0[])
     image = Observable(zeros(RGB{Float64}, width, height))
 
     lines!(
-        visualizer.pc_axis, vpositions;
+        visualizer.pc_axis, slam_positions;
         color=:red, quality=1, linewidth=2,
     )
     meshscatter!(
-        visualizer.pc_axis, vpc;
+        visualizer.pc_axis, slam_mappoints;
         color=:black, markersize=0.02, quality=8,
     )
 
@@ -84,36 +102,9 @@ function main(n_frames::Int)
     xlims!(visualizer.image_axis, (0, width))
     ylims!(visualizer.image_axis, (0, height))
 
-    visualizer |> display
-    sleep(1 / 60)
-
-    min_bound = Point3f0(maxintfloat())
-    max_bound = Point3f0(-maxintfloat())
-
-    for i in 1:length(slam_positions)
-        camera_pos = slam_positions[i]
-        min_bound = min.(min_bound, camera_pos)
-        max_bound = max.(max_bound, camera_pos)
-
-        vpositions[] = push!(vpositions[], camera_pos)
-        vpc[] = append!(vpc[], slam_mappoints[i])
-
-        frame = rotr90(load(joinpath(frames_dir, "frame-$i.png")))
-        image[] = copy!(image[], frame)
-
-        radius = 12.5
-        xlims!(visualizer.pc_axis,
-            (-radius + camera_pos[1], radius + camera_pos[1]))
-        ylims!(visualizer.pc_axis,
-            (-radius + camera_pos[2], radius + camera_pos[2]))
-        zlims!(visualizer.pc_axis, (-1 + camera_pos[3], 1 + camera_pos[3]))
-
-        sleep(1 / 60)
-    end
-
-    xlims!(visualizer.pc_axis, (min_bound[1], max_bound[1]))
-    ylims!(visualizer.pc_axis, (min_bound[2], max_bound[2]))
-    zlims!(visualizer.pc_axis, (min_bound[3], max_bound[3]))
+    xlims!(visualizer.pc_axis, min_bound[1], max_bound[1])
+    ylims!(visualizer.pc_axis, min_bound[2], max_bound[2])
+    zlims!(visualizer.pc_axis, min_bound[3], max_bound[3])
 
     visualizer.figure
 end
