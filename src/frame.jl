@@ -124,7 +124,7 @@ end
 
 function get_keypoint(f::Frame, kpid)
     lock(f.keypoints_lock) do
-        kpid in keys(f.keypoints) ? deepcopy(f.keypoints[kpid]) : nothing
+        deepcopy(get(f.keypoints, kpid, nothing))
     end
 end
 
@@ -299,8 +299,8 @@ end
 
 function turn_keypoint_3d!(f::Frame, id)
     lock(f.keypoints_lock) do
-        id in keys(f.keypoints) || return
-        kp = f.keypoints[id]
+        kp = get(f.keypoints, id, nothing)
+        kp ≡ nothing && return
         kp.is_3d && return
 
         kp.is_3d = true
@@ -330,10 +330,12 @@ end
 function decrease_covisible_kf!(f::Frame, kfid)
     lock(f.covisibility_lock) do
         kfid == f.kfid && return
-        kfid in keys(f.covisible_kf) || return
-        f.covisible_kf[kfid] == 0 && return
-        f.covisible_kf[kfid] -= 1
-        f.covisible_kf[kfid] == 0 && pop!(f.covisible_kf, kfid)
+        cov_score = get(f.covisible_kf, kfid, nothing)
+        (cov_score ≡ nothing || cov_score == 0) && return
+
+        cov_score -= 1
+        f.covisible_kf[kfid] = cov_score
+        cov_score == 0 && pop!(f.covisible_kf, kfid)
     end
 end
 

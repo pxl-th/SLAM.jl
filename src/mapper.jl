@@ -39,6 +39,7 @@ function run!(mapper::Mapper)
         end
 
         new_keyframe = get_keyframe(mapper.map_manager, kf.id)
+        @debug "[MP] Get $(kf.id) KF $(typeof(new_keyframe))"
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
             lock(mapper.map_manager.map_lock) do
                 triangulate_temporal!(mapper, new_keyframe)
@@ -108,11 +109,6 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
 
         # Get 1st KeyFrame observation for the MapPoint.
         observer_kf = get_keyframe(mapper.map_manager, kfid)
-        if observer_kf ≡ nothing
-            @error "[ES] Got delteted observer Keyframe $kfid"
-            @error "[ES] For MapPoint $(kp.id): $observers"
-            exit()
-        end
 
         # Compute relative motion between new KF & observer KF.
         # Don't recompute if the frame's ids don't change.

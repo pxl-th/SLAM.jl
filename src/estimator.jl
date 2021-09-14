@@ -62,12 +62,12 @@ function _gather_extrinsics!(covisibility_map, map_manager, params, new_frame)
     # Go through all KeyFrames in covisibility graph, get their extrinsics,
     # mark them constant/non-constant, get their 3D Keypoints.
     for (kfid, cov_score) in covisibility_map
-        if !(kfid in keys(map_manager.frames_map))
+        kf = get_keyframe(map_manager, kfid)
+        if kf ≡ nothing
             remove_covisible_kf!(new_frame, kfid)
             continue
         end
 
-        kf = get_keyframe(map_manager, kfid)
         local_keyframes[kfid] = kf
         extrinsics[kfid] = get_cw_ba(kf)
 
@@ -79,8 +79,8 @@ function _gather_extrinsics!(covisibility_map, map_manager, params, new_frame)
 
         constant_extrinsics[kfid] = false
         # Add ids of the 3D Keypoints to optimize.
-        for (kpid, kp) in kf.keypoints
-            kp.is_3d && push!(keypoint_ids_to_optimize, kpid)
+        for kp in get_3d_keypoints(kf)
+            push!(keypoint_ids_to_optimize, kp.id)
         end
     end
     (
@@ -103,9 +103,11 @@ function _gather_mappoints!(
     # Link MapPoint with the observer KeyFrames
     # and their corresponding pixel coordinates.
     for kpid in keypoint_ids_to_optimize
-        kpid in keys(map_manager.map_points) || continue
         mp = get_mappoint(map_manager, kpid)
         if mp ≡ nothing
+            continue
+        end
+        if is_bad!(mp)
             push!(bad_keypoints, kpid)
             continue
         end
@@ -121,25 +123,25 @@ function _gather_mappoints!(
             if observer_id in keys(local_keyframes)
                 observer_kf = local_keyframes[observer_id]
             else
-                if !(observer_id in keys(map_manager.frames_map))
+                observer_kf = get_keyframe(map_manager, observer_id)
+                if observer_kf ≡ nothing
                     remove_mappoint_obs!(map_manager, kpid, observer_id)
                     continue
                 end
-                observer_kf = get_keyframe(map_manager, observer_id)
+
                 local_keyframes[observer_id] = observer_kf
                 extrinsics[observer_id] = get_cw_ba(observer_kf)
-
                 constant_extrinsics[observer_id] = true
                 n_constants += 1
             end
+
             # Get corresponding pixel coordinate and link it to the MapPoint.
-            if !(kpid in keys(observer_kf.keypoints))
+            observer_kp_unpx = get_keypoint_unpx(observer_kf, kpid)
+            if observer_kp_unpx ≡ nothing
                 remove_mappoint_obs!(map_manager, kpid, observer_id)
                 continue
             end
-
-            observer_kp = get_keypoint(observer_kf, kpid)
-            mplink[observer_id] = observer_kp.undistorted_pixel
+            mplink[observer_id] = observer_kp_unpx
             n_pixels += 1
         end
         map_points[mp.id] = mplink
@@ -163,12 +165,12 @@ function _convert_to_matrix_form(
     # Convert to matrix form.
     for (mpid, mplink) in map_points
         mp = get_mappoint(map_manager, mpid)
-        @inbounds points_matrix[:, point_id] .= get_position(mp)
+        @assert mp ≢ nothing
+        points_matrix[:, point_id] .= get_position(mp)
 
         for (kfid, pixel) in mplink
             push!(points_ids, point_id)
-
-            @inbounds pixels_matrix[:, pixel_id] .= pixel
+            pixels_matrix[:, pixel_id] .= pixel
             pixel_id += 1
 
             if kfid in keys(extrinsics_order)
@@ -176,8 +178,8 @@ function _convert_to_matrix_form(
                 continue
             end
 
-            @inbounds constants_matrix[extrinsic_id] = constant_extrinsics[kfid]
-            @inbounds extrinsics_matrix[:, extrinsic_id] .= extrinsics[kfid]
+            constants_matrix[extrinsic_id] = constant_extrinsics[kfid]
+            extrinsics_matrix[:, extrinsic_id] .= extrinsics[kfid]
             extrinsics_order[kfid] = extrinsic_id
             push!(extrinsics_ids, extrinsic_id)
             extrinsic_id += 1
@@ -203,8 +205,6 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
         return
     end
 
-    t1 = time()
-
     covisibility_map = deepcopy(get_covisible_map(new_frame))
     covisibility_map[new_frame.kfid] = new_frame.nb_3d_kpts
     # Specifies maximum KeyFrame id in the covisibility graph.
@@ -227,7 +227,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     n_constants += n_constants_tmp
 
     # Ensure there are at least 2 fixed Keyframes.
-    if (n_constants < 2 && length(extrinsics) > 2)
+    if n_constants < 2 && length(extrinsics) > 2
         for kfid in keys(extrinsics)
             constant_extrinsics[kfid] && continue
             constant_extrinsics[kfid] = true
@@ -244,21 +244,12 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
         estimator.map_manager, n_pixels,
     )
 
-    t2 = time()
-    @debug "[ES] LBA Setup took $(t2 - t1)"
-
-    t1 = time()
     new_extrinsics, new_points, ie, fe, outliers = bundle_adjustment(
         new_frame.camera, extrinsics_matrix, points_matrix,
         pixels_matrix, points_ids, extrinsics_ids;
         constant_extrinsics=constants_matrix,
         iterations=10,
     )
-
-    t2 = time()
-    @debug "[ES] LBA Optimization took $(t2 - t1)"
-
-    t1 = time()
 
     # Select outliers and prepare them for removal.
     pixel_id = 1
@@ -281,7 +272,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
 
     lock(estimator.map_manager.map_lock) do
         # Update KeyFrame poses.
-        @inbounds for (kfid, nkfid) in extrinsics_order
+        for (kfid, nkfid) in extrinsics_order
             constant_extrinsics[kfid] && continue
             set_cw_ba!(
                 get_keyframe(estimator.map_manager, kfid),
@@ -340,9 +331,6 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
             end
         end
     end
-
-    t2 = time()
-    @debug "[ES] LBA update took $(t2 - t1)"
 end
 
 """
