@@ -20,17 +20,6 @@ using StaticArrays
 using SparseArrays
 using SparseDiffTools
 
-macro my_async(ex)
-    quote
-        @async try
-            $(esc(ex))
-        catch e
-            println("In task:")
-            @error(exception = (e, catch_backtrace()))
-        end
-    end
-end
-
 const Point2 = SVector{2}
 const Point2i = SVector{2, Int64}
 const Point2f = SVector{2, Float64}
