@@ -119,8 +119,10 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         end
 
         # Get observer keypoint.
-        kp.id in keys(observer_kf.keypoints) || continue
         observer_kp = get_keypoint(observer_kf, kp.id)
+        observer_kp ≡ nothing && continue
+        # kp.id in keys(observer_kf.keypoints) || continue
+        # observer_kp = get_keypoint(observer_kf, kp.id)
         obup = observer_kp.undistorted_pixel
         kpup = kp.undistorted_pixel
 

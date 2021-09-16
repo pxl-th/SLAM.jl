@@ -42,7 +42,7 @@ function main(n_frames::Int)
 
         q_size = get_queue_size(slam_manager)
         f_size = length(slam_manager.mapper.estimator.frame_queue)
-        while q_size > 1 || f_size > 1
+        while q_size != 0 || f_size != 0
             sleep(0.1)
             q_size = get_queue_size(slam_manager)
             f_size = length(slam_manager.mapper.estimator.frame_queue)

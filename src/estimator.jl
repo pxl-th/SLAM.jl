@@ -120,9 +120,12 @@ function _gather_mappoints!(
             # Get observer KeyFrame.
             # If not in the local map,
             # then add it from the global FramesMap as a constant.
-            if observer_id in keys(local_keyframes)
-                observer_kf = local_keyframes[observer_id]
-            else
+            # if observer_id in keys(local_keyframes)
+            #     observer_kf = local_keyframes[observer_id]
+            # else
+
+            observer_kf = get(local_keyframes, observer_id, nothing)
+            if observer_kf ≡ nothing
                 observer_kf = get_keyframe(map_manager, observer_id)
                 if observer_kf ≡ nothing
                     remove_mappoint_obs!(map_manager, kpid, observer_id)
@@ -149,39 +152,47 @@ function _gather_mappoints!(
     map_points, bad_keypoints, n_pixels, n_constants
 end
 
+"""
+Convert data to the Bundle-Adjustment format.
+"""
 function _convert_to_matrix_form(
     extrinsics, constant_extrinsics, map_points, map_manager, n_pixels,
 )
-    # Convert data to the Bundle-Adjustment format.
     extrinsics_matrix = Matrix{Float64}(undef, 6, length(extrinsics))
     constants_matrix = Vector{Bool}(undef, length(extrinsics))
     points_matrix = Matrix{Float64}(undef, 3, length(map_points))
     pixels_matrix = Matrix{Float64}(undef, 2, n_pixels)
 
-    points_ids, extrinsics_ids = Int64[], Int64[]
-    extrinsics_order = Dict{Int64, Int64}() # kfid -> nkf
+    i_point, i_extrinsic = 1, 1
+    points_ids = Vector{Int64}(undef, n_pixels)
+    extrinsics_ids = Vector{Int64}(undef, n_pixels)
+
     extrinsic_id, pixel_id, point_id = 1, 1, 1
+    extrinsics_order = Dict{Int64, Int64}() # kfid -> nkf
 
     # Convert to matrix form.
     for (mpid, mplink) in map_points
         mp = get_mappoint(map_manager, mpid)
-        @assert mp ≢ nothing
         points_matrix[:, point_id] .= get_position(mp)
 
         for (kfid, pixel) in mplink
-            push!(points_ids, point_id)
+            points_ids[i_point] = point_id
+            i_point += 1
             pixels_matrix[:, pixel_id] .= pixel
             pixel_id += 1
 
             if kfid in keys(extrinsics_order)
-                push!(extrinsics_ids, extrinsics_order[kfid])
+                extrinsics_ids[i_extrinsic] = extrinsics_order[kfid]
+                i_extrinsic += 1
                 continue
             end
 
             constants_matrix[extrinsic_id] = constant_extrinsics[kfid]
             extrinsics_matrix[:, extrinsic_id] .= extrinsics[kfid]
             extrinsics_order[kfid] = extrinsic_id
-            push!(extrinsics_ids, extrinsic_id)
+
+            extrinsics_ids[i_extrinsic] = extrinsic_id
+            i_extrinsic += 1
             extrinsic_id += 1
         end
         point_id += 1
@@ -204,6 +215,8 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
         @warn "[ES] Not enough 3D keypoints for BA: $(new_frame.nb_3d_kpts)."
         return
     end
+
+    estimator.params.local_ba_on = true
 
     covisibility_map = deepcopy(get_covisible_map(new_frame))
     covisibility_map[new_frame.kfid] = new_frame.nb_3d_kpts
@@ -331,6 +344,8 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
             end
         end
     end
+
+    estimator.params.local_ba_on = false
 end
 
 """

@@ -90,9 +90,9 @@ function compute_pose!(fe::FrontEnd)
 
     for kp in values(fe.current_frame.keypoints)
         kp.is_3d || continue
-        kp.id in keys(fe.map_manager.map_points) || continue
+        mp = get(fe.map_manager.map_points, kp.id, nothing)
+        mp ≡ nothing && continue
 
-        mp = fe.map_manager.map_points[kp.id]
         do_p3p && push!(p3p_pdn_positions, normalize(kp.position))
         # Convert pixel to `(x, y)` format, expected by P3P.
         push!(p3p_pixels, kp.undistorted_pixel[[2, 1]])
@@ -147,9 +147,7 @@ function compute_pose!(fe::FrontEnd)
 end
 
 function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
-    fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
-
-     # Ensure there are enough keypoints for the essential matrix computation.
+    # Ensure there are enough keypoints for the essential matrix computation.
     if fe.current_frame.nb_keypoints < 8
         @debug "[Front-End] Not enough keypoints for initialization: " *
             "$(fe.current_frame.nb_keypoints)"
@@ -157,7 +155,10 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
     end
 
     # Setup Essential matrix computation.
-    previous_keyframe = fe.map_manager.frames_map[fe.current_frame.kfid]
+    previous_keyframe = get(
+        fe.map_manager.frames_map, fe.current_frame.kfid, nothing,
+    )
+    previous_keyframe ≡ nothing && return false
     R_compensation = get_Rcw(previous_keyframe) * get_Rwc(fe.current_frame)
 
     n_parallax = 0
@@ -169,10 +170,10 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
 
     # Get all Keypoint's positions and compute rotation-compensated parallax.
     for keypoint in values(fe.current_frame.keypoints)
-        keypoint.id in keys(previous_keyframe.keypoints) || continue
+        pkf_keypoint = get(previous_keyframe.keypoints, keypoint.id, nothing)
+        pkf_keypoint ≡ nothing && continue
 
         # Convert points to `(x, y)` format as expected by five points.
-        pkf_keypoint = previous_keyframe.keypoints[keypoint.id]
         push!(previous_points, pkf_keypoint.undistorted_pixel[[2, 1]])
         push!(current_points, keypoint.undistorted_pixel[[2, 1]])
         push!(kp_ids, keypoint.id)
@@ -191,7 +192,7 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
     end
 
     avg_parallax /= n_parallax
-    if (avg_parallax < min_parallax)
+    if avg_parallax < min_parallax
         @warn "[Front-End] Not enough parallax ($avg_parallax) " *
             "to compute 5pt Essential Matrix."
         return false
@@ -212,7 +213,7 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax::Real)
             remove_obs_from_current_frame!(fe.map_manager, kp_ids[i])
         end
     end
-    set_wc!(fe.current_frame, inv(SE3, to_4x4(P)))
+    set_cw!(fe.current_frame, to_4x4(P))
     true
 end
 
@@ -224,14 +225,11 @@ Additionally, compute Essential matrix using 5-point Ransac algorithm
 to filter out outliers and check if there is enough inliers to proceed.
 """
 function check_ready_for_init!(fe::FrontEnd)
-    fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
-
     avg_parallax = compute_parallax(
         fe, fe.current_frame.kfid;
         compensate_rotation=false, median_parallax=true,
     )
     avg_parallax ≤ fe.params.initial_parallax && return false
-
     compute_pose_5pt!(fe; min_parallax=fe.params.initial_parallax)
 end
 
@@ -239,16 +237,22 @@ end
 Check if we need to insert a new KeyFrame into the Map.
 """
 function check_new_kf_required(fe::FrontEnd)::Bool
-    fe.current_frame.kfid in keys(fe.map_manager.frames_map) || return false
-    prev_kf = fe.map_manager.frames_map[fe.current_frame.kfid]
+    prev_kf = get(fe.map_manager.frames_map, fe.current_frame.kfid, nothing)
+    prev_kf ≡ nothing && return false
 
     # Id difference since last KeyFrame.
     frames_δ = fe.current_frame.id - prev_kf.id
-    fe.current_frame.nb_occupied_cells < 0.33 * fe.params.max_nb_keypoints &&
-        frames_δ ≥ 5 && return true # TODO && !params.localba_is_on
-    fe.current_frame.nb_3d_kpts < 20 && frames_δ ≥ 2 && return true
-    fe.current_frame.nb_3d_kpts > 0.5 * fe.params.max_nb_keypoints &&
-        frames_δ < 2 && return false # TODO || params.localba_is_on
+    if fe.current_frame.nb_occupied_cells < 0.33 * fe.params.max_nb_keypoints &&
+        frames_δ ≥ 5 && !fe.params.local_ba_on
+        return true
+    end
+    if fe.current_frame.nb_3d_kpts < 20 && frames_δ ≥ 2
+        return true
+    end
+    if fe.current_frame.nb_3d_kpts > 0.5 * fe.params.max_nb_keypoints &&
+        (fe.params.local_ba_on || frames_δ < 2)
+        return false
+    end
 
     # Time difference since last KeyFrame.
     time_δ = fe.current_frame.time - prev_kf.time
@@ -260,8 +264,8 @@ function check_new_kf_required(fe::FrontEnd)::Bool
     c0 = median_parallax ≥ fe.params.initial_parallax
     c1 = fe.current_frame.nb_3d_kpts < 0.75 * prev_kf.nb_3d_kpts
     c2 = fe.current_frame.nb_occupied_cells < 0.5 * fe.params.max_nb_keypoints &&
-        fe.current_frame.nb_3d_kpts < 0.85 * prev_kf.nb_3d_kpts
-        # TODO && params.localba_is_on
+        fe.current_frame.nb_3d_kpts < 0.85 * prev_kf.nb_3d_kpts &&
+        !fe.params.local_ba_on
 
     cx && (c0 || c1 || c2)
 end
@@ -284,13 +288,13 @@ function compute_parallax(
     compensate_rotation::Bool = true,
     only_2d::Bool = true, median_parallax::Bool = true,
 )
-    if !(current_frame_id in keys(fe.map_manager.frames_map))
+    frame = get(fe.map_manager.frames_map, current_frame_id, nothing)
+    if frame ≡ nothing
         @warn "[Front-End] Error in `compute_parallax`! " *
             "Keyframe $current_frame_id does not exist."
         return 0.0
     end
 
-    frame = fe.map_manager.frames_map[current_frame_id]
     current_rotation = compensate_rotation ?
         get_Rcw(frame) * get_Rwc(fe.current_frame) :
         SMatrix{3, 3, Float64}(I)
