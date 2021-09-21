@@ -402,5 +402,13 @@ function reset!(estimator::Estimator)
     lock(estimator.queue_lock) do
         estimator.new_kf_available = false
         empty!(estimator.frame_queue)
-    end
-end
+  
+
+
+
+
+
+
+
+
+qqq

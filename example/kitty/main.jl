@@ -41,11 +41,11 @@ function main(n_frames::Int)
         add_image!(slam_manager, frame, timestamp)
 
         q_size = get_queue_size(slam_manager)
-        f_size = length(slam_manager.mapper.estimator.frame_queue)
-        while q_size != 0 || f_size != 0
-            sleep(0.1)
+        # f_size = length(slam_manager.mapper.estimator.frame_queue)
+        while q_size != 0 #|| f_size != 0
+            sleep(1e-2)
             q_size = get_queue_size(slam_manager)
-            f_size = length(slam_manager.mapper.estimator.frame_queue)
+            # f_size = length(slam_manager.mapper.estimator.frame_queue)
         end
 
         sleep(1e-3)
