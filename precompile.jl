@@ -4,10 +4,8 @@ using Images
 using ImageDraw
 using ImageFeatures
 using ImageTracking
-using VideoIO
 using Rotations
 using Manifolds
-using Parameters
 using DataStructures
 using GLMakie
 

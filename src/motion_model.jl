@@ -31,9 +31,9 @@ Apply Motion Model to a given `wc` transformation.
 """
 function (m::MotionModel)(wc::SMatrix{4, 4, Float64}, time)
     m.prev_time < 0 && return wc
-    # wc and m.prev_wc should be equal here,
+    # `wc` and `m.prev_wc` should be equal here,
     # since prev_wc is updated right after pose computation.
-    # If not, which can happen after loop closure, update to stay consistent.
+    # If not - update to stay consistent.
     δ = log_lie(SE3, wc * inv(SE3, m.prev_wc))
     all(isapprox.(δ, 0; atol=1e-5)) || (m.prev_wc = wc;)
 

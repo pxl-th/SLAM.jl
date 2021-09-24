@@ -218,12 +218,12 @@ function pnp_bundle_adjustment(
         LeastSquaresProblem(;x=X0, y=Y, f! = residue!),
         LevenbergMarquardt(); iterations, show_trace,
     )
-    X0 = fast_result.minimizer
+    X1 = fast_result.minimizer
 
     # Detect outliers using `fast_result` minimizer.
     n_outliers = 0
     @inbounds @simd for i in 1:length(points)
-        pt = RotZYX(@view(X0[1:3])...) * points[i] .+ @view(X0[4:6])
+        pt = RotZYX(@view(X1[1:3])...) * points[i] .+ @view(X1[4:6])
         r = pixels[i] .- project(camera, pt)
         outlier = pt[3] < depth_ϵ || (r[1]^2 + r[2]^2) > repr_ϵ
         outliers[i] = outlier
@@ -240,7 +240,7 @@ function pnp_bundle_adjustment(
     Y .= 0.0
     ignore_outliers = true
     result = optimize!(
-        LeastSquaresProblem(;x=fast_result.minimizer, y=Y, f! = residue!),
+        LeastSquaresProblem(;x=X1, y=Y, f! = residue!),
         LevenbergMarquardt(); iterations, show_trace,
     )
 

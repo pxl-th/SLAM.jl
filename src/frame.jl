@@ -240,6 +240,18 @@ function set_cw!(f::Frame, cw)
     end
 end
 
+function get_cw(f::Frame)
+    lock(f.pose_lock) do
+        f.cw
+    end
+end
+
+function get_wc(f::Frame)
+    lock(f.pose_lock) do
+        f.wc
+    end
+end
+
 function get_Rwc(f::Frame)
     lock(f.pose_lock) do
         f.wc[1:3, 1:3]

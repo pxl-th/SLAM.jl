@@ -93,10 +93,10 @@ function _gather_mappoints!(
     keypoint_ids_to_optimize, map_manager,
     local_keyframes, max_kfid,
 )
-    map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}() # {mpid → {kfid → pixel}}
+    # {mpid → {kfid → pixel}}
+    map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}()
     bad_keypoints = Set{Int64}() # kpid/mpid
-    n_constants = 0
-    n_pixels = 0
+    n_pixels, n_constants = 0, 0
 
     # Go through all 3D Keypoints to optimize.
     # Link MapPoint with the observer KeyFrames
@@ -117,12 +117,8 @@ function _gather_mappoints!(
         for observer_id in get_observers(mp)
             observer_id > max_kfid && continue
             # Get observer KeyFrame.
-            # If not in the local map,
-            # then add it from the global FramesMap as a constant.
-            # if observer_id in keys(local_keyframes)
-            #     observer_kf = local_keyframes[observer_id]
-            # else
-
+            # If not in the local map, then add it from the global
+            # frames map as a constant.
             observer_kf = get(local_keyframes, observer_id, nothing)
             if observer_kf ≡ nothing
                 observer_kf = get_keyframe(map_manager, observer_id)
