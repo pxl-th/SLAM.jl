@@ -44,14 +44,28 @@ Params:
 end
 
 function to_4x4(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
-    m = vcat(m, SMatrix{1, 3, T}(0, 0, 0))
-    hcat(m, SVector{4, T}(0, 0, 0, 1))
+    SMatrix{4, 4, T}(
+        m[1, 1], m[2, 1], m[3, 1], 0,
+        m[1, 2], m[2, 2], m[3, 2], 0,
+        m[1, 3], m[2, 3], m[3, 3], 0,
+        0,       0,       0,       1,
+    )
 end
 function to_4x4(m::SMatrix{3, 4, T})::SMatrix{4, 4, T} where T
-    vcat(m, SMatrix{1, 4, T}(0, 0, 0, 1))
+    SMatrix{4, 4, T}(
+        m[1, 1], m[2, 1], m[3, 1], 0,
+        m[1, 2], m[2, 2], m[3, 2], 0,
+        m[1, 3], m[2, 3], m[3, 3], 0,
+        m[1, 4], m[2, 4], m[3, 4], 1,
+    )
 end
 function to_4x4(m, t)
-    vcat(SMatrix{3, 4}(m..., t...), SMatrix{1, 4}(0, 0, 0, 1.0))
+    SMatrix{4, 4, Float64}(
+        m[1, 1], m[2, 1], m[3, 1], 0,
+        m[1, 2], m[2, 2], m[3, 2], 0,
+        m[1, 3], m[2, 3], m[3, 3], 0,
+        t[1],    t[2],    t[3],    1,
+    )
 end
 
 include("camera.jl")
@@ -108,6 +122,7 @@ function SlamManager(params::Params, camera::Camera)
 
     mapper = Mapper(params, map_manager, frame)
     mapper_thread = Threads.@spawn run!(mapper)
+    @info "[SM] Launched mapper thread."
 
     SlamManager(
         params,
@@ -145,7 +160,7 @@ function run!(sm::SlamManager)
         image, time = get_image!(sm)
         if image ≡ nothing
             @debug "[SM] No new image, waiting..."
-            sleep(1)
+            sleep(1e-2)
             continue
         end
 
@@ -164,23 +179,13 @@ function run!(sm::SlamManager)
         # Send it to the mapper queue for traingulation.
         is_kf_required || continue
 
-        add_new_kf!(sm.mapper, KeyFrame(sm.current_frame.kfid, image))
+        add_new_kf!(sm.mapper, KeyFrame(sm.current_frame.kfid))
+        sleep(1e-2)
     end
 
     sm.mapper.exit_required = true
     wait(sm.mapper_thread)
-    @debug "[SM] Exit required."
-end
-
-function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
-    radius = 2
-    n_outside = 0
-    for kp in values(frame.keypoints)
-        in_image(frame.camera, kp.pixel) || (n_outside += 1; continue;)
-        color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
-        draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
-    end
-    image
+    @info "[SM] Exit required."
 end
 
 function reset!(sm::SlamManager)

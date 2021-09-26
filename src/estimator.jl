@@ -20,14 +20,19 @@ function run!(estimator::Estimator)
     while !estimator.exit_required
         new_kf = get_new_kf!(estimator)
         if new_kf ≡ nothing
-            sleep(1e-3)
+            sleep(1e-2)
             continue
         end
 
-        local_bundle_adjustment!(estimator, new_kf)
+        try
+            local_bundle_adjustment!(estimator, new_kf)
+        catch e
+            showerror(stdout, e)
+            display(stacktrace(catch_backtrace()))
+        end
         # map_filtering!(estimator, new_kf)
     end
-    @debug "[ES] Exit required."
+    @info "[ES] Exit required."
 end
 
 function add_new_kf!(estimator::Estimator, frame::Frame)
@@ -45,7 +50,7 @@ function get_new_kf!(estimator::Estimator)
         end
 
         # TODO if more than 1 frame in queue, add them to ba anyway.
-        @debug "[ES] Popping queue $(length(estimator.frame_queue))."
+        @info "[ES] Popping queue $(length(estimator.frame_queue))."
         estimator.new_kf_available = false
         popfirst!(estimator.frame_queue)
     end

@@ -185,8 +185,7 @@ function _ba_detect_outliers!(
 end
 
 function pnp_bundle_adjustment(
-    camera::Camera, pose::SMatrix{4, 4, Float64},
-    pixels::Vector{Point2f}, points::Vector{Point3f};
+    camera::Camera, pose::SMatrix{4, 4, Float64}, pixels, points;
     iterations::Int = 10, show_trace::Bool = false,
     depth_ϵ::Real = 1e-6, repr_ϵ::Real = 5.0,
 )

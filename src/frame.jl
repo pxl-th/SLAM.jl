@@ -43,9 +43,9 @@ mutable struct Frame
 
     time::Float64
     # world -> camera transformation.
-    cw::SMatrix{4, 4, Float64}
+    cw::SMatrix{4, 4, Float64, 16}
     # camera -> world transformation.
-    wc::SMatrix{4, 4, Float64}
+    wc::SMatrix{4, 4, Float64, 16}
     # Calibration camera model.
     camera::Camera
     """

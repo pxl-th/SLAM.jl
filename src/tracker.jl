@@ -1,34 +1,4 @@
 """
-Perform Forward-Backward Lucas-Kanade optical flow tracking.
-
-# Arguments:
-
-- `keypoints::Vector{Point2f}`:
-    Vector of 2d keypoints in `(row, col)` format which to track.
-
-# Returns:
-
-`Tuple{Vector{Point2f}, Vector{Bool}}`.
-New keypoints and their status.
-"""
-function fb_tracking(
-    previous_image, current_image, keypoints;
-    nb_iterations::Int = 30, window_size::Int = 11, pyramid_levels::Int = 3,
-    max_distance::Real = 0.5,
-)::Tuple{Vector{Point2f}, BitVector}
-    new_keypoints = Vector{Point2f}(undef, length(keypoints))
-
-    algorithm = LucasKanade(nb_iterations; window_size, pyramid_levels)
-    previous_pyramid = ImageTracking.LKPyramid(previous_image, pyramid_levels)
-    current_pyramid = ImageTracking.LKPyramid(current_image, pyramid_levels)
-
-    fb_tracking!(
-        new_keypoints, previous_pyramid, current_pyramid, keypoints,
-        algorithm; max_distance,
-    )
-end
-
-"""
 Perform Forward-Backward tracking by first tracking keypoints from
 `previous_pyramid` to `current_pyramid` and then track resuling keypoints
 in reverse order.
@@ -45,12 +15,11 @@ from the original keypoints to be consistent.
     to be considered the same keypoint.
 """
 function fb_tracking!(
-    new_keypoints::Vector{Point2f},
+    new_keypoints::AbstractVector{Point2f},
     previous_pyramid::ImageTracking.LKPyramid,
     current_pyramid::ImageTracking.LKPyramid,
-    keypoints::Vector{Point2f},
-    algorithm::LucasKanade;
-    max_distance::Real = 0.5,
+    keypoints::AbstractVector{Point2f},
+    algorithm::LucasKanade; max_distance::Real = 0.5,
 )
     isempty(keypoints) && return
 
@@ -96,7 +65,7 @@ end
 function fb_tracking!(
     previous_pyramid::ImageTracking.LKPyramid,
     current_pyramid::ImageTracking.LKPyramid,
-    keypoints::Vector{Point2f};
+    keypoints::AbstractVector{Point2f};
     nb_iterations::Int = 30, window_size::Int = 11, pyramid_levels::Int = 3,
     max_distance::Real = 0.5,
 )

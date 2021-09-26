@@ -1,6 +1,6 @@
 struct KeyFrame
     id::Int64
-    image::Matrix{Gray}
+    # image::Matrix{Gray}
 end
 
 mutable struct Mapper
@@ -21,7 +21,7 @@ end
 function Mapper(params::Params, map_manager::MapManager, frame::Frame)
     estimator = Estimator(map_manager, params)
     estimator_thread = Threads.@spawn run!(estimator)
-    @debug "[MP] Launched estimator."
+    @info "[MP] Launched estimator thread."
 
     Mapper(
         params, map_manager, estimator,
@@ -34,15 +34,24 @@ function run!(mapper::Mapper)
     while !mapper.exit_required
         succ, kf = get_new_kf!(mapper)
         if !succ
-            sleep(1)
+            sleep(1e-2)
             continue
         end
 
         new_keyframe = get_keyframe(mapper.map_manager, kf.id)
-        @debug "[MP] Get $(kf.id) KF $(typeof(new_keyframe))"
+        new_keyframe ≡ nothing &&
+            @error "[MP] Got invalid frame $(kf.id) from Map"
+        @info "[MP] Get $(kf.id) KF"
+
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
-            lock(mapper.map_manager.map_lock) do
+            lock(mapper.map_manager.map_lock)
+            try
                 triangulate_temporal!(mapper, new_keyframe)
+            catch e
+                showerror(stdout, e)
+                display(stacktrace(catch_backtrace()))
+            finally
+                unlock(mapper.map_manager.map_lock)
             end
         end
 
@@ -70,11 +79,12 @@ function run!(mapper::Mapper)
         # TODO send new KF to loop closer
     end
     mapper.estimator.exit_required = true
-    @debug "[MP] Exit required."
+    @info "[MP] Exit required."
     wait(mapper.estimator_thread)
 end
 
 function triangulate_temporal!(mapper::Mapper, frame::Frame)
+    @info "[MP] Triangulation..."
     keypoints = get_2d_keypoints(frame)
     if isempty(keypoints)
         @warn "[MP] No 2D keypoints to triangulate."
@@ -85,8 +95,10 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
 
     good, candidates = 0, 0
     rel_kfid = -1
-    rel_pose = SMatrix{4, 4, Float64}(I) # frame -> observer key frame.
-    rel_pose_inv = SMatrix{4, 4, Float64}(I) # observer key frame -> frame.
+    # frame -> observer key frame.
+    rel_pose::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
+    # observer key frame -> frame.
+    rel_pose_inv::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
 
     cam = frame.camera
     max_error = mapper.params.max_reprojection_error
@@ -164,7 +176,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         update_mappoint!(mapper.map_manager, kp.id, wpt)
         good += 1
     end
-    @debug "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
+    @info "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
 end
 
 function get_new_kf!(mapper::Mapper)
@@ -175,6 +187,7 @@ function get_new_kf!(mapper::Mapper)
         end
 
         keyframe = popfirst!(mapper.keyframe_queue)
+        @info "[MP] Popping queue $(length(mapper.keyframe_queue))"
         mapper.new_kf_available = !isempty(mapper.keyframe_queue)
         true, keyframe
     end
