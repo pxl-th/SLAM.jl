@@ -80,11 +80,6 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
     end
 
     succ = compute_pose!(fe)
-    # if !succ && pose_5pt ≢ nothing
-    #     @info "[FE] P3P failed, setting 5PT pose."
-    #     set_cw!(fe.current_frame, pose_5pt)
-    # end
-
     # Update motion model from estimated pose.
     update!(fe.motion_model, fe.current_frame.wc, time)
     check_new_kf_required(fe)

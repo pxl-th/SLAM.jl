@@ -84,8 +84,8 @@ function run!(mapper::Mapper)
 end
 
 function triangulate_temporal!(mapper::Mapper, frame::Frame)
-    @info "[MP] Triangulation..."
     keypoints = get_2d_keypoints(frame)
+    @info "[MP] Triangulating $(length(keypoints)) Keypoints..."
     if isempty(keypoints)
         @warn "[MP] No 2D keypoints to triangulate."
         return
@@ -105,6 +105,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
 
     # Go through all 2D keypoints in `frame`.
     for kp in keypoints
+        @assert !kp.is_3d
         # Remove mappoints observation if not in map.
         if !(kp.id in keys(mapper.map_manager.map_points))
             remove_mappoint_obs!(mapper.map_manager, kp.id, frame.kfid)

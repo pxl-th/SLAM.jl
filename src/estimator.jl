@@ -80,12 +80,9 @@ function _gather_extrinsics!(covisibility_map, map_manager, params, new_frame)
             n_constants += 1
             continue
         end
-
         constant_extrinsics[kfid] = false
         # Add ids of the 3D Keypoints to optimize.
-        for kp in get_3d_keypoints(kf)
-            push!(keypoint_ids_to_optimize, kp.id)
-        end
+        union!(keypoint_ids_to_optimize, get_3d_keypoints_ids(kf))
     end
     (
         extrinsics, constant_extrinsics, local_keyframes,
