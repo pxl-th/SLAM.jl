@@ -79,7 +79,7 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
         end
     end
 
-    succ = compute_pose!(fe)
+    compute_pose!(fe)
     # Update motion model from estimated pose.
     update!(fe.motion_model, fe.current_frame.wc, time)
     check_new_kf_required(fe)

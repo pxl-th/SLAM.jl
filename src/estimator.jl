@@ -27,8 +27,8 @@ function run!(estimator::Estimator)
         try
             local_bundle_adjustment!(estimator, new_kf)
         catch e
-            showerror(stdout, e)
-            display(stacktrace(catch_backtrace()))
+            showerror(stdout, e); println()
+            display(stacktrace(catch_backtrace())); println()
         end
         # map_filtering!(estimator, new_kf)
     end
@@ -50,9 +50,10 @@ function get_new_kf!(estimator::Estimator)
         end
 
         # TODO if more than 1 frame in queue, add them to ba anyway.
-        @info "[ES] Popping queue $(length(estimator.frame_queue))."
         estimator.new_kf_available = false
-        popfirst!(estimator.frame_queue)
+        kf = popfirst!(estimator.frame_queue)
+        @info "[ES] Popping queue $(length(estimator.frame_queue)): $(kf.kfid)."
+        kf
     end
 end
 
@@ -84,6 +85,7 @@ function _gather_extrinsics!(covisibility_map, map_manager, params, new_frame)
         # Add ids of the 3D Keypoints to optimize.
         union!(keypoint_ids_to_optimize, get_3d_keypoints_ids(kf))
     end
+    @info "[ES] OLD Constants 1: $n_constants."
     (
         extrinsics, constant_extrinsics, local_keyframes,
         keypoint_ids_to_optimize, n_constants,
@@ -146,6 +148,9 @@ function _gather_mappoints!(
         end
         map_points[mp.id] = mplink
     end
+    @info "[ES] OLD Total observations: $n_pixels."
+    @info "[ES] OLD Poses: $(length(extrinsics))."
+    @info "[ES] OLD Constants: $n_constants."
     map_points, bad_keypoints, n_pixels, n_constants
 end
 
@@ -200,6 +205,180 @@ function _convert_to_matrix_form(
     )
 end
 
+struct Observation
+    pixel::Point2f
+
+    point::Point3f
+    pose::NTuple{6, Float64}
+
+    point_order::Int64
+    pose_order::Int64
+
+    constant::Bool
+    kfid::Int64
+    mpid::Int64
+end
+
+struct LocalBACache
+    observations::Vector{Observation}
+
+    θ::Vector{Float64}
+    θconst::Vector{Bool}
+    pixels::Vector{Float64}
+
+    poses_ids::Vector{Int64}
+    points_ids::Vector{Int64}
+
+    poses_remap::Vector{Int64} # order id → kfid
+    points_remap::Vector{Int64} # order id → mpid
+end
+
+function _get_ba_parameters(
+    map_manager::MapManager, params::Params, frame::Frame,
+    covisibility_map::Dict{Int64, Int64},
+)
+    # poses: kfid → (order id, θ).
+    poses = Dict{Int64, Tuple{Int64, NTuple{6, Float64}}}()
+    constant_poses = Set{Int64}()
+    # map_points: mpid → (order id, point).
+    map_points = Dict{Int64, Tuple{Int64, Point3f}}()
+
+    keypoints_ids = Set{Int64}()
+    bad_keypoints = Set{Int64}()
+
+    observations = Vector{Observation}(undef, 0)
+    sizehint!(observations, 1000)
+
+    poses_remap = Vector{Int64}(undef, 0)
+    points_remap = Vector{Int64}(undef, 0)
+    sizehint!(poses_remap, 10)
+    sizehint!(points_remap, 1000)
+
+    for (co_kfid, score) in covisibility_map
+        co_frame = get_keyframe(map_manager, co_kfid)
+        co_frame ≡ nothing && (remove_covisible_kf!(frame, co_kfid); continue)
+        (co_kfid > frame.kfid || get_3d_keypoints_nb(co_frame) == 0 ||
+            score == 0) && continue
+
+        if !(co_kfid in keys(poses))
+            pose_order_id = length(poses) + 1
+            poses[co_kfid] = (pose_order_id, get_cw_ba(co_frame))
+            push!(poses_remap, co_kfid)
+
+            if !(co_kfid in constant_poses)
+                is_constant = score < params.min_cov_score || co_kfid == 0
+                is_constant && (push!(constant_poses, co_kfid); continue)
+            end
+        end
+
+        for kpid in get_3d_keypoints_ids(co_frame)
+            kpid in keypoints_ids && continue
+            push!(keypoints_ids, kpid)
+
+            mp = get_mappoint(map_manager, kpid)
+            mp ≡ nothing && continue
+            is_bad!(mp) && (push!(bad_keypoints, kpid); continue)
+
+            mp_order_id = length(map_points) + 1
+            mp_position = get_position(mp)
+            map_points[kpid] = (mp_order_id, mp_position)
+            push!(points_remap, kpid)
+
+            # For each observer, add observation: px ← (mp, pose).
+            constant_observers = 0
+            for ob_kfid in get_observers(mp)
+                ob_kfid > frame.kfid && continue
+
+                ob_frame = get_keyframe(map_manager, ob_kfid)
+                if ob_frame ≡ nothing
+                    remove_mappoint_obs!(map_manager, kpid, ob_kfid)
+                    continue
+                end
+                ob_pixel = get_keypoint_unpx(ob_frame, kpid)
+                if ob_pixel ≡ nothing
+                    remove_mappoint_obs!(map_manager, kpid, ob_kfid)
+                    continue
+                end
+
+                in_processed = ob_kfid in keys(poses)
+                in_covmap = ob_kfid in keys(covisibility_map)
+                in_constants = ob_kfid in constant_poses
+
+                is_constant = ob_kfid == 0 || in_constants || !in_covmap
+                !is_constant && in_covmap && (is_constant =
+                    covisibility_map[ob_kfid] < params.min_cov_score;)
+
+                # Allow only two constant observer KeyFrames
+                # outside of covisibility graph to reduce BA complexity.
+                if !in_covmap
+                    if constant_observers < 2
+                        constant_observers += 1
+                    else continue end
+                end
+
+                if in_processed
+                    pose_order_id, ob_pose = poses[ob_kfid]
+                else
+                    ob_pose = get_cw_ba(ob_frame)
+                    is_constant && push!(constant_poses, ob_kfid)
+                    pose_order_id = length(poses) + 1
+                    poses[ob_kfid] = (pose_order_id, ob_pose)
+                    push!(poses_remap, ob_kfid)
+                end
+
+                push!(observations, Observation(
+                    ob_pixel, mp_position, ob_pose,
+                    mp_order_id, pose_order_id,
+                    is_constant, ob_kfid, kpid,
+                ))
+            end
+        end
+    end
+    n_observations = length(observations)
+    n_poses, n_points = length(poses), length(map_points)
+    point_shift = n_poses * 6
+
+    @info "[ES] Total Observations: $(length(observations))."
+    @info "[ES] Poses: $(length(poses)), Covisibility: $(length(covisibility_map))."
+    @info "[ES] Constants: $(length(constant_poses))."
+
+    θ = Vector{Float64}(undef, point_shift + n_points * 3)
+    θconst = Vector{Bool}(undef, n_poses)
+    poses_ids = Vector{Int64}(undef, n_observations)
+    points_ids = Vector{Int64}(undef, n_observations)
+    pixels = Vector{Float64}(undef, n_observations * 2)
+
+    processed_poses = fill(false, n_poses)
+    processed_points = fill(false, n_points)
+
+    for (oi, observation) in enumerate(observations)
+        p = (oi - 1) * 2
+        pixels[(p + 1):(p + 2)] .= observation.pixel
+        poses_ids[oi] = observation.pose_order
+        points_ids[oi] = observation.point_order
+
+        if !processed_poses[observation.pose_order]
+            processed_poses[observation.pose_order] = true
+            p = (observation.pose_order - 1) * 6
+            θ[(p + 1):(p + 6)] .= observation.pose
+            θconst[observation.pose_order] = observation.constant
+        end
+        if !processed_points[observation.point_order]
+            processed_points[observation.point_order] = true
+            p = point_shift + (observation.point_order - 1) * 3
+            θ[(p + 1):(p + 3)] .= observation.point
+        end
+    end
+
+    @assert sum(processed_poses) == n_poses "Poses: $(sum(processed_poses)) ↔ $n_poses. \n"
+    @assert sum(processed_points) == n_points "Points: $(sum(processed_points)) ↔ $n_points. \n"
+
+    LocalBACache(
+        observations, θ, θconst, pixels, poses_ids, points_ids,
+        poses_remap, points_remap,
+    )
+end
+
 """
 Perform Bundle-Adjustment on the new frame and its covisibility graph.
 
@@ -215,25 +394,35 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
 
     estimator.params.local_ba_on = true
 
-    covisibility_map = deepcopy(get_covisible_map(new_frame))
+    covisibility_map = get_covisible_map(new_frame)
     covisibility_map[new_frame.kfid] = new_frame.nb_3d_kpts
     # Specifies maximum KeyFrame id in the covisibility graph.
     # To avoid adding observer to the BA problem,
     # that is more recent than the `new_frame`.
     max_kfid = new_frame.kfid
 
+    try
+        t1 = time()
+        cache = _get_ba_parameters(
+            estimator.map_manager, estimator.params, new_frame, covisibility_map)
+        t2 = time()
+        @info "[ES] NEW Parameters gather: $(t2 - t1) seconds."
+    catch e
+        showerror(stdout, e)
+        display(stacktrace(catch_backtrace()))
+    end
+
+    t1 = time()
     (
         extrinsics, constant_extrinsics, local_keyframes,
         keypoint_ids_to_optimize, n_constants,
     ) = _gather_extrinsics!(
-        covisibility_map, estimator.map_manager, estimator.params, new_frame,
-    )
+        covisibility_map, estimator.map_manager, estimator.params, new_frame)
 
     map_points, bad_keypoints, n_pixels, n_constants_tmp = _gather_mappoints!(
         extrinsics, constant_extrinsics,
         keypoint_ids_to_optimize, estimator.map_manager,
-        local_keyframes, max_kfid,
-    )
+        local_keyframes, max_kfid)
     n_constants += n_constants_tmp
 
     # Ensure there are at least 2 fixed Keyframes.
@@ -251,14 +440,15 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
         points_matrix, pixels_matrix, extrinsics_ids, points_ids,
     ) = _convert_to_matrix_form(
         extrinsics, constant_extrinsics, map_points,
-        estimator.map_manager, n_pixels,
-    )
+        estimator.map_manager, n_pixels)
+
+    t2 = time()
+    @info "[ES] OLD Parameters gather: $(t2 - t1) seconds."
 
     new_extrinsics, new_points, error, outliers = bundle_adjustment(
         new_frame.camera, extrinsics_matrix, points_matrix,
         pixels_matrix, points_ids, extrinsics_ids;
-        constant_extrinsics=constants_matrix, iterations=10,
-    )
+        constant_extrinsics=constants_matrix, iterations=10)
 
     # Select outliers and prepare them for removal.
     pixel_id = 1
@@ -285,8 +475,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
             constant_extrinsics[kfid] && continue
             set_cw_ba!(
                 get_keyframe(estimator.map_manager, kfid),
-                @view(new_extrinsics[:, nkfid]),
-            )
+                @view(new_extrinsics[:, nkfid]))
         end
 
         for (pid, mpid) in enumerate(keys(map_points))
@@ -318,8 +507,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
             # MapPoint is good, update its position.
             set_position!(
                 get_mappoint(estimator.map_manager, mpid),
-                @view(new_points[:, pid]),
-            )
+                @view(new_points[:, pid]))
         end
 
         # MapPoint culling for bad observations.

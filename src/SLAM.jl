@@ -2,7 +2,7 @@ module SLAM
 export SlamManager, add_image!, get_queue_size
 export Params, Camera, run!, to_cartesian, Visualizer
 
-using DataStructures: OrderedSet, OrderedDict
+using OrderedCollections: OrderedSet, OrderedDict
 using GLMakie
 using Images
 using ImageDraw
@@ -197,5 +197,16 @@ function reset!(sm::SlamManager)
     sm.map_manager |> reset!
     @warn "[Slam Manager] Reset applied."
 end
+
+precompile(track!, (FrontEnd, Matrix{Float64}, Float64))
+precompile(track_mono!, (FrontEnd, Matrix{Float64}, Float64))
+precompile(compute_pose!, (FrontEnd,))
+precompile(compute_pose_5pt!, (FrontEnd,))
+
+precompile(run!, (Mapper,))
+precompile(triangulate_temporal!, (Mapper, Frame,))
+
+precompile(run!, (Estimator,))
+precompile(local_bundle_adjustment!, (Estimator, Frame,))
 
 end
