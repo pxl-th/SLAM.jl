@@ -38,7 +38,7 @@ end
 
 function get_keyframe(m::MapManager, kfid)
     lock(m.keyframe_lock) do
-        kfid in keys(m.frames_map) ? m.frames_map[kfid] : nothing
+        get(m.frames_map, kfid, nothing)
     end
 end
 
@@ -50,7 +50,7 @@ end
 
 function get_mappoint(m::MapManager, mpid)
     lock(m.mappoint_lock) do
-        mpid in keys(m.map_points) ? m.map_points[mpid] : nothing
+        get(m.map_points, mpid, nothing)
     end
 end
 
@@ -63,23 +63,19 @@ end
 
 function prepare_frame!(m::MapManager)
     m.current_frame.kfid = m.current_keyframe_id
+    @info "[MM] Adding KF $(m.current_frame.kfid) to Map."
 
     # Filter if there are too many keypoints.
     # if m.current_frame.nb_keypoints > m.params.max_nb_keypoints
     #     # TODO
     # end
 
-    n_added = 0
-    n_removed = 0
     for kp in values(m.current_frame.keypoints)
-        if kp.id in keys(m.map_points)
-            # Link new Keyframe to the MapPoint.
-            mp = m.map_points[kp.id]
-            add_keyframe_observation!(mp, m.current_keyframe_id)
-            n_added += 1
-        else
+        mp = get(m.map_points, kp.id, nothing)
+        if mp ≡ nothing
             remove_obs_from_current_frame!(m, kp.id)
-            n_removed += 1
+        else
+            add_keyframe_observation!(mp, m.current_keyframe_id)
         end
     end
 end
@@ -94,24 +90,21 @@ function extract_keypoints!(m::MapManager, image)
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
 
-    descriptors, keypoints = describe(m.extractor, image, keypoints)
-    add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
+    add_keypoints_to_frame!(m, m.current_frame, keypoints)
 end
 
-function add_keypoints_to_frame!(
-    m::MapManager, frame::Frame, keypoints, descriptors,
-)
+function add_keypoints_to_frame!(m::MapManager, frame, keypoints)
     lock(m.mappoint_lock) do
-        for (kp, dp) in zip(keypoints, descriptors)
+        for kp in keypoints
             # m.current_mappoint_id is incremented in `add_mappoint!`.
             add_keypoint!(frame, Point2f(kp[1], kp[2]), m.current_mappoint_id)
-            add_mappoint!(m, dp)
+            add_mappoint!(m)
         end
     end
 end
 
-function add_mappoint!(m::MapManager, descriptor)
-    mp = MapPoint(m.current_mappoint_id, m.current_keyframe_id, descriptor)
+@inline function add_mappoint!(m::MapManager)
+    mp = MapPoint(m.current_mappoint_id, m.current_keyframe_id)
     m.map_points[m.current_mappoint_id] = mp
     m.current_mappoint_id += 1
     m.nb_mappoints += 1
@@ -128,15 +121,15 @@ function remove_mappoint!(m::MapManager, id)
     lock(m.mappoint_lock)
 
     if !(id in keys(m.map_points))
-        unlock(m.keyframe_lock)
         unlock(m.mappoint_lock)
+        unlock(m.keyframe_lock)
         return
     end
 
     mp = m.map_points[id]
     for observer_id in mp.observer_keyframes_ids
-        observer_id in keys(m.frames_map) || continue
-        observer_kf = m.frames_map[observer_id]
+        observer_kf = get(m.frames_map, observer_id, nothing)
+        observer_kf ≡ nothing && continue
 
         remove_keypoint!(observer_kf, id)
         for co_observer_id in mp.observer_keyframes_ids
@@ -171,21 +164,20 @@ function remove_keyframe!(m::MapManager, kfid)
     lock(m.keyframe_lock)
     lock(m.mappoint_lock)
 
-    if !(kfid in keys(m.frames_map))
-        unlock(m.keyframe_lock)
+    kf = get(m.frames_map, kfid, nothing)
+    if kf ≡ nothing
         unlock(m.mappoint_lock)
+        unlock(m.keyframe_lock)
         return
     end
 
-    kf = m.frames_map[kfid]
     for kp in get_keypoints(kf)
-        kp.id in keys(m.map_points) &&
-            remove_kf_observation!(m.map_points[kp.id], kfid)
+        mp = get(m.map_points, kp.id, nothing)
+        mp ≢ nothing && remove_kf_observation!(mp, kfid)
     end
-
     for cov_kfid in keys(kf.covisible_kf)
-        cov_kfid in keys(m.frames_map) &&
-            remove_covisible_kf!(m.frames_map[cov_kfid], kfid)
+        cov_kf = get(m.frames_map, cov_kfid, nothing)
+        cov_kf ≢ nothing && remove_covisible_kf!(cov_kf, kfid)
     end
 
     pop!(m.frames_map, kfid)
@@ -200,13 +192,9 @@ Remove a MapPoint observation from current Frame by `id`.
 """
 function remove_obs_from_current_frame!(m::MapManager, id::Int64)
     remove_keypoint!(m.current_frame, id)
-    # TODO visualization related part. Point-cloud point removal.
     # Set MapPoint as not observable.
-    if id in keys(m.map_points)
-        m.map_points[id].is_observed = false
-    else
-        # TODO Reset point in visualization point-cloud to origin.
-    end
+    mp = get(m.map_points, id, nothing)
+    mp ≢ nothing && (mp.is_observed = false;)
 end
 
 """
@@ -216,30 +204,31 @@ function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
     lock(m.keyframe_lock)
     lock(m.mappoint_lock)
 
-    if !(kpid in keys(m.map_points))
-        unlock(m.keyframe_lock)
+    mp = get(m.map_points, kpid, nothing)
+    if mp ≡ nothing
         unlock(m.mappoint_lock)
+        unlock(m.keyframe_lock)
         return
     end
+
+    # Remove KeyFrame observation from MapPoint.
+    remove_kf_observation!(mp, kfid)
 
     # Remove MapPoint from KeyFrame.
-    frame_exists = kfid in keys(m.frames_map)
-    frame_exists && remove_keypoint!(m.frames_map[kfid], kpid)
-    # Remove KeyFrame observation from MapPoint.
-    mappoint = m.map_points[kpid]
-    remove_kf_observation!(mappoint, kfid)
-
-    if !frame_exists
-        unlock(m.keyframe_lock)
+    kf = get(m.frames_map, kfid, nothing)
+    if kf ≡ nothing
         unlock(m.mappoint_lock)
+        unlock(m.keyframe_lock)
         return
     end
+    remove_keypoint!(kf, kpid)
 
-    frame = m.frames_map[kfid]
-    for observer_id in mappoint.observer_keyframes_ids
-        observer_id in keys(m.frames_map) || continue
-        decrease_covisible_kf!(frame, observer_id)
-        decrease_covisible_kf!(m.frames_map[observer_id], kfid)
+    for observer_id in mp.observer_keyframes_ids
+        observer_kf = get(m.frames_map, observer_id, nothing)
+        observer_kf ≡ nothing && continue
+
+        decrease_covisible_kf!(kf, observer_id)
+        decrease_covisible_kf!(observer_kf, kfid)
     end
 
     unlock(m.keyframe_lock)
@@ -254,8 +243,8 @@ function update_mappoint!(m::MapManager, kpid, new_position)
     lock(m.mappoint_lock)
 
     if !(kpid in keys(m.map_points))
-        unlock(m.keyframe_lock)
         unlock(m.mappoint_lock)
+        unlock(m.keyframe_lock)
         return
     end
 
@@ -278,8 +267,8 @@ function update_mappoint!(m::MapManager, kpid, new_position)
     end
     set_position!(mp, new_position)
 
-    unlock(m.keyframe_lock)
     unlock(m.mappoint_lock)
+    unlock(m.keyframe_lock)
 end
 
 """

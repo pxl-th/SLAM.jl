@@ -20,19 +20,14 @@ function run!(estimator::Estimator)
     while !estimator.exit_required
         new_kf = get_new_kf!(estimator)
         if new_kf ≡ nothing
-            sleep(1e-2)
+            sleep(1e-3)
             continue
         end
 
-        try
-            local_bundle_adjustment!(estimator, new_kf)
-        catch e
-            showerror(stdout, e)
-            display(stacktrace(catch_backtrace()))
-        end
+        local_bundle_adjustment!(estimator, new_kf)
         # map_filtering!(estimator, new_kf)
     end
-    @info "[ES] Exit required."
+    @debug "[ES] Exit required."
 end
 
 function add_new_kf!(estimator::Estimator, frame::Frame)
@@ -50,7 +45,7 @@ function get_new_kf!(estimator::Estimator)
         end
 
         # TODO if more than 1 frame in queue, add them to ba anyway.
-        @info "[ES] Popping queue $(length(estimator.frame_queue))."
+        @debug "[ES] Popping queue $(length(estimator.frame_queue))."
         estimator.new_kf_available = false
         popfirst!(estimator.frame_queue)
     end
@@ -80,9 +75,12 @@ function _gather_extrinsics!(covisibility_map, map_manager, params, new_frame)
             n_constants += 1
             continue
         end
+
         constant_extrinsics[kfid] = false
         # Add ids of the 3D Keypoints to optimize.
-        union!(keypoint_ids_to_optimize, get_3d_keypoints_ids(kf))
+        for kp in get_3d_keypoints(kf)
+            push!(keypoint_ids_to_optimize, kp.id)
+        end
     end
     (
         extrinsics, constant_extrinsics, local_keyframes,
@@ -95,10 +93,10 @@ function _gather_mappoints!(
     keypoint_ids_to_optimize, map_manager,
     local_keyframes, max_kfid,
 )
-    # {mpid → {kfid → pixel}}
-    map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}()
+    map_points = OrderedDict{Int64, OrderedDict{Int64, Point2f}}() # {mpid → {kfid → pixel}}
     bad_keypoints = Set{Int64}() # kpid/mpid
-    n_pixels, n_constants = 0, 0
+    n_constants = 0
+    n_pixels = 0
 
     # Go through all 3D Keypoints to optimize.
     # Link MapPoint with the observer KeyFrames
@@ -119,8 +117,12 @@ function _gather_mappoints!(
         for observer_id in get_observers(mp)
             observer_id > max_kfid && continue
             # Get observer KeyFrame.
-            # If not in the local map, then add it from the global
-            # frames map as a constant.
+            # If not in the local map,
+            # then add it from the global FramesMap as a constant.
+            # if observer_id in keys(local_keyframes)
+            #     observer_kf = local_keyframes[observer_id]
+            # else
+
             observer_kf = get(local_keyframes, observer_id, nothing)
             if observer_kf ≡ nothing
                 observer_kf = get_keyframe(map_manager, observer_id)
@@ -400,5 +402,13 @@ function reset!(estimator::Estimator)
     lock(estimator.queue_lock) do
         estimator.new_kf_available = false
         empty!(estimator.frame_queue)
-    end
-end
+  
+
+
+
+
+
+
+
+
+qqq

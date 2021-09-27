@@ -1,6 +1,6 @@
 struct KeyFrame
     id::Int64
-    image::Matrix{Gray}
+    # image::Matrix{Gray}
 end
 
 mutable struct Mapper
@@ -21,7 +21,7 @@ end
 function Mapper(params::Params, map_manager::MapManager, frame::Frame)
     estimator = Estimator(map_manager, params)
     estimator_thread = Threads.@spawn run!(estimator)
-    @debug "[MP] Launched estimator."
+    @info "[MP] Launched estimator thread."
 
     Mapper(
         params, map_manager, estimator,
@@ -34,14 +34,24 @@ function run!(mapper::Mapper)
     while !mapper.exit_required
         succ, kf = get_new_kf!(mapper)
         if !succ
-            sleep(1)
+            sleep(1e-2)
             continue
         end
 
         new_keyframe = get_keyframe(mapper.map_manager, kf.id)
+        new_keyframe ≡ nothing &&
+            @error "[MP] Got invalid frame $(kf.id) from Map"
+        @info "[MP] Get $(kf.id) KF"
+
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
-            lock(mapper.map_manager.map_lock) do
+            lock(mapper.map_manager.map_lock)
+            try
                 triangulate_temporal!(mapper, new_keyframe)
+            catch e
+                showerror(stdout, e)
+                display(stacktrace(catch_backtrace()))
+            finally
+                unlock(mapper.map_manager.map_lock)
             end
         end
 
@@ -69,12 +79,13 @@ function run!(mapper::Mapper)
         # TODO send new KF to loop closer
     end
     mapper.estimator.exit_required = true
-    @debug "[MP] Exit required."
+    @info "[MP] Exit required."
     wait(mapper.estimator_thread)
 end
 
 function triangulate_temporal!(mapper::Mapper, frame::Frame)
     keypoints = get_2d_keypoints(frame)
+    @info "[MP] Triangulating $(length(keypoints)) Keypoints..."
     if isempty(keypoints)
         @warn "[MP] No 2D keypoints to triangulate."
         return
@@ -84,14 +95,17 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
 
     good, candidates = 0, 0
     rel_kfid = -1
-    rel_pose = SMatrix{4, 4, Float64}(I) # frame -> observer key frame.
-    rel_pose_inv = SMatrix{4, 4, Float64}(I) # observer key frame -> frame.
+    # frame -> observer key frame.
+    rel_pose::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
+    # observer key frame -> frame.
+    rel_pose_inv::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
 
     cam = frame.camera
     max_error = mapper.params.max_reprojection_error
 
     # Go through all 2D keypoints in `frame`.
     for kp in keypoints
+        @assert !kp.is_3d
         # Remove mappoints observation if not in map.
         if !(kp.id in keys(mapper.map_manager.map_points))
             remove_mappoint_obs!(mapper.map_manager, kp.id, frame.kfid)
@@ -109,9 +123,8 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Get 1st KeyFrame observation for the MapPoint.
         observer_kf = get_keyframe(mapper.map_manager, kfid)
         if observer_kf ≡ nothing
-            @error "[ES] Got delteted observer Keyframe $kfid"
-            @error "[ES] For MapPoint $(kp.id): $observers"
-            exit()
+            @error "Missing keyframe in triangulation."
+            continue # TODO should this be possible?
         end
 
         # Compute relative motion between new KF & observer KF.
@@ -123,8 +136,10 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         end
 
         # Get observer keypoint.
-        kp.id in keys(observer_kf.keypoints) || continue
         observer_kp = get_keypoint(observer_kf, kp.id)
+        observer_kp ≡ nothing && continue
+        # kp.id in keys(observer_kf.keypoints) || continue
+        # observer_kp = get_keypoint(observer_kf, kp.id)
         obup = observer_kp.undistorted_pixel
         kpup = kp.undistorted_pixel
 
@@ -162,7 +177,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         update_mappoint!(mapper.map_manager, kp.id, wpt)
         good += 1
     end
-    @debug "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
+    @info "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
 end
 
 function get_new_kf!(mapper::Mapper)
@@ -173,6 +188,7 @@ function get_new_kf!(mapper::Mapper)
         end
 
         keyframe = popfirst!(mapper.keyframe_queue)
+        @info "[MP] Popping queue $(length(mapper.keyframe_queue))"
         mapper.new_kf_available = !isempty(mapper.keyframe_queue)
         true, keyframe
     end

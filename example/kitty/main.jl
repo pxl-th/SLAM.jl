@@ -42,13 +42,12 @@ function main(n_frames::Int)
 
         q_size = get_queue_size(slam_manager)
         f_size = length(slam_manager.mapper.estimator.frame_queue)
-        while q_size > 1 || f_size > 1
-            sleep(0.1)
+        while q_size > 0 || f_size > 0
+            sleep(1e-2)
             q_size = get_queue_size(slam_manager)
             f_size = length(slam_manager.mapper.estimator.frame_queue)
         end
-
-        sleep(1e-3)
+        sleep(1e-2)
     end
 
     slam_manager.exit_required = true
@@ -97,7 +96,7 @@ function main(n_frames::Int)
     )
     meshscatter!(
         visualizer.pc_axis, slam_mappoints;
-        color=:black, markersize=0.05, quality=8,
+        color=:black, markersize=0.02, quality=8,
     )
 
     image!(visualizer.image_axis, image)
@@ -108,5 +107,5 @@ function main(n_frames::Int)
     ylims!(visualizer.pc_axis, min_bound[2], max_bound[2])
     zlims!(visualizer.pc_axis, min_bound[3], max_bound[3])
 
-    visualizer.figure
+    slam_manager, visualizer.figure
 end

@@ -12,8 +12,8 @@ struct Camera
     p1::Float64
     p2::Float64
     # Intrinsic matrix.
-    K::SMatrix{3, 3, Float64}
-    iK::SMatrix{3, 3, Float64}
+    K::SMatrix{3, 3, Float64, 9}
+    iK::SMatrix{3, 3, Float64, 9}
     # Image resolution.
     height::Int64
     width::Int64
@@ -24,7 +24,7 @@ function Camera(
     k1, k2, p1, p2, # Distortion coefficients.
     height, width,
 )
-    K = SMatrix{3, 3, Float64}(
+    K = SMatrix{3, 3, Float64, 9}(
         fx, 0.0, 0.0,
         0.0, fy, 0.0,
         cx, cy, 1.0,

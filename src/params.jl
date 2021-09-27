@@ -61,6 +61,10 @@ Base.@kwdef mutable struct Params
     This is used to filter out non-informative Frames.
     """
     filtering_ratio::Float64 = 0.9
+    """
+    Indicates whether system is performing Local Bundle-Adjustment now.
+    """
+    local_ba_on::Bool = false
 end
 
 function reset!(p::Params)

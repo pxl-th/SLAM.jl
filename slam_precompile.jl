@@ -8,10 +8,8 @@ create_sysimage(
         :ImageDraw,
         :ImageFeatures,
         :ImageTracking,
-        :VideoIO,
         :Rotations,
         :Manifolds,
-        :Parameters,
         :DataStructures,
         :GLMakie,
 

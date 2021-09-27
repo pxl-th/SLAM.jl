@@ -12,7 +12,6 @@ mutable struct Keypoint
     Position of a keypoint in 3D space in `(x, y, z = 1)` format.
     """
     position::Point3f
-    descriptor::BitVector
     is_3d::Bool
 end
 
@@ -23,10 +22,10 @@ function Keypoint(::Val{:invalid})
     )
 end
 
-function Keypoint(id, kp::ImageFeatures.Keypoint, descriptor::BitVector)
-    kp = Point2f(kp[1], kp[2])
-    Keypoint(id, kp, kp, descriptor, false)
-end
+# function Keypoint(id, kp::ImageFeatures.Keypoint)
+#     kp = Point2f(kp[1], kp[2])
+#     Keypoint(id, kp, kp, false)
+# end
 
 @inline is_valid(k::Keypoint)::Bool = k.id != -1
 
@@ -43,9 +42,9 @@ mutable struct Frame
 
     time::Float64
     # world -> camera transformation.
-    cw::SMatrix{4, 4, Float64}
+    cw::SMatrix{4, 4, Float64, 16}
     # camera -> world transformation.
-    wc::SMatrix{4, 4, Float64}
+    wc::SMatrix{4, 4, Float64, 16}
     # Calibration camera model.
     camera::Camera
     """
@@ -112,19 +111,43 @@ end
 
 function get_2d_keypoints(f::Frame)
     lock(f.keypoints_lock) do
-        [deepcopy(k) for k in values(f.keypoints) if !k.is_3d]
+        kps = Vector{Keypoint}(undef, f.nb_2d_kpts)
+        i = 1
+        for k in values(f.keypoints)
+            k.is_3d || (kps[i] = deepcopy(k); i += 1;)
+        end
+        @assert (i - 1) == f.nb_2d_kpts
+        kps
     end
 end
 
 function get_3d_keypoints(f::Frame)
     lock(f.keypoints_lock) do
-        [deepcopy(k) for k in values(f.keypoints) if k.is_3d]
+        kps = Vector{Keypoint}(undef, f.nb_3d_kpts)
+        i = 1
+        for k in values(f.keypoints)
+            k.is_3d && (kps[i] = deepcopy(k); i += 1;)
+        end
+        @assert (i - 1) == f.nb_3d_kpts
+        kps
+    end
+end
+
+function get_3d_keypoints_ids(f::Frame)
+    lock(f.keypoints_lock) do
+        ids = Vector{Int64}(undef, f.nb_3d_kpts)
+        i = 1
+        for k in values(f.keypoints)
+            k.is_3d && (ids[i] = k.id; i += 1;)
+        end
+        @assert (i - 1) == f.nb_3d_kpts
+        ids
     end
 end
 
 function get_keypoint(f::Frame, kpid)
     lock(f.keypoints_lock) do
-        kpid in keys(f.keypoints) ? deepcopy(f.keypoints[kpid]) : nothing
+        deepcopy(get(f.keypoints, kpid, nothing))
     end
 end
 
@@ -135,14 +158,10 @@ function get_keypoint_unpx(f::Frame, kpid)
     end
 end
 
-function add_keypoint!(
-    f::Frame, point::Point2f, id::Int64;
-    descriptor::BitVector = BitVector(), is_3d::Bool = false,
-)
+function add_keypoint!(f::Frame, point, id; is_3d::Bool = false)
     undistorted_point = undistort_point(f.camera, point)
     position = backproject(f.camera, undistorted_point)
-    kp = Keypoint(id, point, undistorted_point, position, descriptor, is_3d)
-    add_keypoint!(f, kp)
+    add_keypoint!(f, Keypoint(id, point, undistorted_point, position, is_3d))
 end
 
 function add_keypoint!(f::Frame, keypoint::Keypoint)
@@ -192,16 +211,16 @@ function update_keypoint_in_grid!(
 end
 
 function add_keypoint_to_grid!(f::Frame, keypoint::Keypoint)
+    kpi = to_cartesian(keypoint.pixel, f.cell_size)
     lock(f.grid_lock) do
-        kpi = to_cartesian(keypoint.pixel, f.cell_size)
         isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells += 1;)
         push!(f.keypoints_grid[kpi], keypoint.id)
     end
 end
 
 function remove_keypoint_from_grid!(f::Frame, keypoint::Keypoint)
+    kpi = to_cartesian(keypoint.pixel, f.cell_size)
     lock(f.grid_lock) do
-        kpi = to_cartesian(keypoint.pixel, f.cell_size)
         if keypoint.id in f.keypoints_grid[kpi]
             pop!(f.keypoints_grid[kpi], keypoint.id)
             isempty(f.keypoints_grid[kpi]) && (f.nb_occupied_cells -= 1)
@@ -237,6 +256,18 @@ function set_cw!(f::Frame, cw)
     lock(f.pose_lock) do
         f.cw = cw
         f.wc = inv(SE3, cw)
+    end
+end
+
+function get_cw(f::Frame)
+    lock(f.pose_lock) do
+        f.cw
+    end
+end
+
+function get_wc(f::Frame)
+    lock(f.pose_lock) do
+        f.wc
     end
 end
 
@@ -299,8 +330,8 @@ end
 
 function turn_keypoint_3d!(f::Frame, id)
     lock(f.keypoints_lock) do
-        id in keys(f.keypoints) || return
-        kp = f.keypoints[id]
+        kp = get(f.keypoints, id, nothing)
+        kp ≡ nothing && return
         kp.is_3d && return
 
         kp.is_3d = true
@@ -330,10 +361,12 @@ end
 function decrease_covisible_kf!(f::Frame, kfid)
     lock(f.covisibility_lock) do
         kfid == f.kfid && return
-        kfid in keys(f.covisible_kf) || return
-        f.covisible_kf[kfid] == 0 && return
-        f.covisible_kf[kfid] -= 1
-        f.covisible_kf[kfid] == 0 && pop!(f.covisible_kf, kfid)
+        cov_score = get(f.covisible_kf, kfid, nothing)
+        (cov_score ≡ nothing || cov_score == 0) && return
+
+        cov_score -= 1
+        f.covisible_kf[kfid] = cov_score
+        cov_score == 0 && pop!(f.covisible_kf, kfid)
     end
 end
 
