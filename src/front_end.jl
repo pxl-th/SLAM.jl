@@ -357,21 +357,17 @@ function compute_parallax(
         get_Rcw(frame) * get_Rwc(fe.current_frame) :
         SMatrix{3, 3, Float64}(I)
 
-    # Compute parallax.
     avg_parallax = 0.0
     n_parallax = 0
     parallax_set = Float64[]
 
-    # Compute parallax for all keypoints in previous KeyFrame.
     for keypoint in values(fe.current_frame.keypoints)
         only_2d && keypoint.is_3d && continue
         keypoint.id in keys(frame.keypoints) || continue
 
-        # Compute parallax with undistorted pixel position.
         upx = keypoint.undistorted_pixel
-        if compensate_rotation
-            upx = project(frame.camera, current_rotation * keypoint.position)
-        end
+        compensate_rotation && (upx =
+            project(frame.camera, current_rotation * keypoint.position);)
 
         parallax = norm(upx - get_keypoint_unpx(frame, keypoint.id))
         avg_parallax += parallax
@@ -389,19 +385,7 @@ function compute_parallax(
     avg_parallax
 end
 
-"""
-Preprocess image before tracking.
-
-Steps:
-- Update previous image with current.
-- TODO (Optionally) apply CLAHE.
-- Update current image with `image`.
-"""
 function preprocess!(fe::FrontEnd, image)
-    # TODO apply clahe to image
-
-    # Update previous if tracking from Frame to Frame
-    # and not from KeyFrame to Frame.
     fe.previous_image = fe.current_image
     fe.previous_pyramid = fe.current_pyramid
 

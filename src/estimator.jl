@@ -215,12 +215,16 @@ struct Observation
     pose_order::Int64
 
     constant::Bool
+    in_covmap::Bool
+
     kfid::Int64
     mpid::Int64
 end
 
 struct LocalBACache
     observations::Vector{Observation}
+    outliers::Vector{Bool} # same length as observations
+    bad_keypoints::Set{Int64}
 
     θ::Vector{Float64}
     θconst::Vector{Bool}
@@ -233,9 +237,21 @@ struct LocalBACache
     points_remap::Vector{Int64} # order id → mpid
 end
 
+function LocalBACache(
+    observations, bad_keypoints, θ, θconst, pixels,
+    poses_ids, points_ids, poses_remap, points_remap,
+)
+    outliers = fill(false, length(observations))
+    # outliers = Vector{Bool}(undef, length(observations))
+    LocalBACache(
+        observations, outliers, bad_keypoints, θ, θconst, pixels,
+        poses_ids, points_ids, poses_remap, points_remap,
+    )
+end
+
 function _get_ba_parameters(
-    map_manager::MapManager, params::Params, frame::Frame,
-    covisibility_map::Dict{Int64, Int64},
+    map_manager::MapManager, frame::Frame,
+    covisibility_map::Dict{Int64, Int64}, min_cov_score,
 )
     # poses: kfid → (order id, θ).
     poses = Dict{Int64, Tuple{Int64, NTuple{6, Float64}}}()
@@ -243,7 +259,7 @@ function _get_ba_parameters(
     # map_points: mpid → (order id, point).
     map_points = Dict{Int64, Tuple{Int64, Point3f}}()
 
-    keypoints_ids = Set{Int64}()
+    processed_keypoints_ids = Set{Int64}()
     bad_keypoints = Set{Int64}()
 
     observations = Vector{Observation}(undef, 0)
@@ -266,18 +282,19 @@ function _get_ba_parameters(
             push!(poses_remap, co_kfid)
 
             if !(co_kfid in constant_poses)
-                is_constant = score < params.min_cov_score || co_kfid == 0
+                is_constant = score < min_cov_score || co_kfid == 0
                 is_constant && (push!(constant_poses, co_kfid); continue)
             end
         end
 
         for kpid in get_3d_keypoints_ids(co_frame)
-            kpid in keypoints_ids && continue
-            push!(keypoints_ids, kpid)
+            kpid in processed_keypoints_ids && continue
+            push!(processed_keypoints_ids, kpid)
 
             mp = get_mappoint(map_manager, kpid)
             mp ≡ nothing && continue
             is_bad!(mp) && (push!(bad_keypoints, kpid); continue)
+            # TODO skip, if mp is_weak or get rid of is_weak entirelly?
 
             mp_order_id = length(map_points) + 1
             mp_position = get_position(mp)
@@ -306,7 +323,7 @@ function _get_ba_parameters(
 
                 is_constant = ob_kfid == 0 || in_constants || !in_covmap
                 !is_constant && in_covmap && (is_constant =
-                    covisibility_map[ob_kfid] < params.min_cov_score;)
+                    covisibility_map[ob_kfid] < min_cov_score;)
 
                 # Allow only two constant observer KeyFrames
                 # outside of covisibility graph to reduce BA complexity.
@@ -329,7 +346,7 @@ function _get_ba_parameters(
                 push!(observations, Observation(
                     ob_pixel, mp_position, ob_pose,
                     mp_order_id, pose_order_id,
-                    is_constant, ob_kfid, kpid,
+                    is_constant, in_covmap, ob_kfid, kpid,
                 ))
             end
         end
@@ -374,9 +391,73 @@ function _get_ba_parameters(
     @assert sum(processed_points) == n_points "Points: $(sum(processed_points)) ↔ $n_points. \n"
 
     LocalBACache(
-        observations, θ, θconst, pixels, poses_ids, points_ids,
-        poses_remap, points_remap,
+        observations, bad_keypoints, θ, θconst, pixels,
+        poses_ids, points_ids, poses_remap, points_remap,
     )
+end
+
+"""
+if obs is outlier
+    -> remove mappoint obs for respective keyframe
+    -> add mp id to bad keypoints
+
+for mp
+    -> if nothing, remove it
+    -> if less than 3 observers, remove it
+    -> otherwise update position
+
+for bad kps
+    -> remove mappoints
+"""
+function _update_ba_parameters!(
+    map_manager::MapManager, cache::LocalBACache, current_kfid,
+)
+    n_poses = length(cache.poses_remap)
+    n_point = length(cache.points_remap)
+    points_shift = n_poses * 6
+
+    for (i, kfid) in enumerate(cache.poses_remap)
+        p = (i - 1) * 6
+        kf = get_keyframe(map_manager, kfid)
+        @assert kf ≢ nothing
+
+        old_pose = get_cw_ba(kf)
+        new_pose = cache.θ[(p + 1):(p + 6)]
+        @assert all(isapprox.(new_pose, old_pose))
+        set_cw_ba!(kf, new_pose)
+    end
+
+    for i in 1:length(cache.observations)
+        cache.outliers[i] || continue
+
+        obs = cache.observations[i]
+        obs.in_covmap && remove_mappoint_obs!(map_manager, obs.mpid, obs.kfid)
+        obs.kfid == current_kfid &&
+            remove_obs_from_current_frame!(map_manager, obs.mpid)
+
+        push!(cache.bad_keypoints, obs.mpid)
+    end
+
+    for (i, mpid) in enumerate(cache.points_remap)
+        mp = get_mappoint(map_manager, mpid)
+        @assert mp ≢ nothing
+        if is_bad!(mp)
+            remove_mappoint!(map_manager, mpid)
+            mpid in cache.bad_keypoints && pop!(cache.bad_keypoints, mpid)
+        else
+            p = points_shift + (i - 1) * 3
+            old_position = get_position(mp)
+            new_position = cache.θ[(p + 1):(p + 3)]
+            @assert all(isapprox.(new_position, old_position))
+            set_position!(mp, new_position)
+        end
+    end
+
+    for bad_kpid in cache.bad_keypoints
+        mp = get_mappoint(map_manager, bad_kpid)
+        mp ≡ nothing && continue
+        is_bad!(mp) && remove_mappoint!(map_manager, mp)
+    end
 end
 
 """
@@ -404,9 +485,12 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     try
         t1 = time()
         cache = _get_ba_parameters(
-            estimator.map_manager, estimator.params, new_frame, covisibility_map)
+            estimator.map_manager, new_frame, covisibility_map,
+            estimator.params.min_cov_score)
+
+        _update_ba_parameters!(estimator.map_manager, cache, new_frame.kfid)
         t2 = time()
-        @info "[ES] NEW Parameters gather: $(t2 - t1) seconds."
+        @info "[ES] NEW BA Time: $(t2 - t1) seconds."
     catch e
         showerror(stdout, e)
         display(stacktrace(catch_backtrace()))
@@ -441,9 +525,6 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     ) = _convert_to_matrix_form(
         extrinsics, constant_extrinsics, map_points,
         estimator.map_manager, n_pixels)
-
-    t2 = time()
-    @info "[ES] OLD Parameters gather: $(t2 - t1) seconds."
 
     new_extrinsics, new_points, error, outliers = bundle_adjustment(
         new_frame.camera, extrinsics_matrix, points_matrix,
@@ -530,6 +611,9 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     end
 
     estimator.params.local_ba_on = false
+
+    t2 = time()
+    @info "[ES] OLD BA Time: $(t2 - t1) seconds."
 end
 
 """
