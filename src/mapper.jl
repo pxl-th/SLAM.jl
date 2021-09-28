@@ -122,10 +122,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
 
         # Get 1st KeyFrame observation for the MapPoint.
         observer_kf = get_keyframe(mapper.map_manager, kfid)
-        if observer_kf ≡ nothing
-            @error "Missing keyframe in triangulation."
-            continue # TODO should this be possible?
-        end
+        observer_kf ≡ nothing && continue # TODO should this be possible?
 
         # Compute relative motion between new KF & observer KF.
         # Don't recompute if the frame's ids don't change.

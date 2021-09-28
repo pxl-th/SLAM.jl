@@ -123,10 +123,17 @@ function compute_pose!(fe::FrontEnd)
 
     if do_p3p
         # P3P computes world → camera projection.
-        n_inliers, model = p3p_ransac(
+        res = p3p_ransac(
             p3p_3d_points, p3p_pixels, p3p_pdn_positions,
             fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
         )
+        if res ≡ nothing
+            @warn "[Front-End] P3P Ransac returned Nothing."
+            fe |> reset_frame!
+            return false
+        end
+
+        n_inliers, model = res
         if n_inliers < 5 || model ≡ nothing
             @warn "[Front-End] Not enough inliers for P3P pose estimation."
             fe |> reset_frame!
@@ -257,14 +264,13 @@ function compute_pose_5pt!(
     end
 
     if use_motion_model
-        # Get motion model translation scale from last KeyFrame.
+        # Get motion-model translation scale from last KeyFrame.
         prev_cw = get_cw(previous_keyframe)
         current = prev_cw * get_wc(fe.current_frame)
         scale = norm(current[1:3, 4])
 
         R, t = P[1:3, 1:3], P[1:3, 4]
         t = scale .* normalize(t)
-        # return prev_cw * to_4x4(R, t)
         return to_4x4(R, t) * prev_cw
     end
     to_4x4(P) # cw pose

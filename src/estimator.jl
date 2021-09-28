@@ -122,7 +122,11 @@ function _get_ba_parameters(
     sizehint!(poses_remap, 10)
     sizehint!(points_remap, 1000)
 
+    too_much = false
+
     for (co_kfid, score) in covisibility_map
+        too_much && break
+
         co_frame = get_keyframe(map_manager, co_kfid)
         co_frame ≡ nothing && (remove_covisible_kf!(frame, co_kfid); continue)
         (co_kfid > frame.kfid || get_3d_keypoints_nb(co_frame) == 0 ||
@@ -140,6 +144,8 @@ function _get_ba_parameters(
         end
 
         for kpid in get_3d_keypoints_ids(co_frame)
+            too_much && break
+
             kpid in processed_keypoints_ids && continue
             push!(processed_keypoints_ids, kpid)
 
@@ -180,11 +186,11 @@ function _get_ba_parameters(
                 # Allow only 2 constant and 3 normal observer KeyFrames
                 # to reduce BA complexity.
                 if in_covmap
-                    if normal_observers < 3
+                    if normal_observers < 2
                         normal_observers += 1
                     else continue end
                 else
-                    if constant_observers < 2
+                    if constant_observers < 1
                         constant_observers += 1
                     else continue end
                 end
@@ -204,6 +210,7 @@ function _get_ba_parameters(
                     mp_order_id, pose_order_id,
                     is_constant, in_covmap, ob_kfid, kpid,
                 ))
+                length(observations) ≥ 2000 && (too_much = true; break)
             end
         end
     end
@@ -212,6 +219,8 @@ function _get_ba_parameters(
     n_poses, n_points = length(poses), length(map_points)
     point_shift = n_poses * 6
     @info "[ES] BA Observations: $n_observations."
+    @info "[ES] BA Poses: $n_poses."
+    @info "[ES] BA Points: $n_points."
 
     θ = Vector{Float64}(undef, point_shift + n_points * 3)
     θconst = Vector{Bool}(undef, n_poses)
@@ -311,7 +320,16 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
         estimator.map_manager, new_frame, covisibility_map,
         estimator.params.min_cov_score)
     bundle_adjustment!(cache, new_frame.camera)
-    _update_ba_parameters!(estimator.map_manager, cache, new_frame.kfid)
+
+    lock(estimator.map_manager.map_lock)
+    try
+        _update_ba_parameters!(estimator.map_manager, cache, new_frame.kfid)
+    catch e
+        showerror(stdout, e); println()
+        display(stacktrace(catch_backtrace())); println()
+    finally
+        unlock(estimator.map_manager.map_lock)
+    end
 
     t2 = time()
     @info "[ES] NEW BA Time: $(t2 - t1) seconds."
@@ -341,7 +359,7 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
         kf = get_keyframe(estimator.map_manager, kfid)
         if kf.nb_3d_kpts < estimator.params.min_cov_score ÷ 2
             remove_keyframe!(estimator.map_manager, kfid)
-            @debug "[ES] Removed KeyFrame $kfid."
+            @info "[ES] Removed KeyFrame $kfid."
             n_removed += 1
             continue
         end
@@ -364,11 +382,11 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
         ratio = n_good / n_total
         if ratio > estimator.params.filtering_ratio
             remove_keyframe!(estimator.map_manager, kfid)
-            @debug "[ES] Removed KeyFrame $kfid."
+            @info "[ES] Removed KeyFrame $kfid."
             n_removed += 1
         end
     end
-    @debug "[ES] Removed $n_removed KeyFrames."
+    @info "[ES] Removed $n_removed KeyFrames."
 end
 
 function reset!(estimator::Estimator)

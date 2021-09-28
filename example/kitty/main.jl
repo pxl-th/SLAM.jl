@@ -29,7 +29,9 @@ function main(n_frames::Int)
         0, 0, 0, 0,
         height, width,
     )
-    params = Params(;window_size=31, max_distance=50)
+    params = Params(;
+        window_size=31, max_distance=50, pyramid_levels=3,
+        max_nb_keypoints=1000)
     slam_manager = SlamManager(params, camera)
     slam_manager_thread = Threads.@spawn run!(slam_manager)
 
@@ -59,6 +61,7 @@ function main(n_frames::Int)
     # Visualize result.
     map_manager = slam_manager.map_manager
     kfids = sort!(collect(keys(map_manager.frames_map)))
+    @show kfids
 
     min_bound = Point3f0(maxintfloat())
     max_bound = Point3f(-maxintfloat())
@@ -69,6 +72,9 @@ function main(n_frames::Int)
 
     for kfid in kfids
         position = (map_manager.frames_map[kfid].wc * base_position)[1:3]
+        # TODO why this happens?
+        all(isapprox.(position, 0.0)) && kfid > 0 && continue
+
         position = Point3f0(position[[1, 3, 2]])
         push!(slam_positions, position)
 
@@ -88,7 +94,7 @@ function main(n_frames::Int)
     @load positions_save_file slam_positions
 
     visualizer = Visualizer((height, width))
-    image = Observable(zeros(RGB{Float64}, width, height))
+    markersize = minimum(max_bound .- min_bound) * 1e-2
 
     lines!(
         visualizer.pc_axis, slam_positions;
@@ -96,12 +102,8 @@ function main(n_frames::Int)
     )
     meshscatter!(
         visualizer.pc_axis, slam_mappoints;
-        color=:black, markersize=0.02, quality=8,
+        color=:black, markersize, quality=8,
     )
-
-    image!(visualizer.image_axis, image)
-    xlims!(visualizer.image_axis, (0, width))
-    ylims!(visualizer.image_axis, (0, height))
 
     xlims!(visualizer.pc_axis, min_bound[1], max_bound[1])
     ylims!(visualizer.pc_axis, min_bound[2], max_bound[2])
