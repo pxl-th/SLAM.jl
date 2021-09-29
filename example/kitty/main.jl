@@ -61,7 +61,6 @@ function main(n_frames::Int)
     # Visualize result.
     map_manager = slam_manager.map_manager
     kfids = sort!(collect(keys(map_manager.frames_map)))
-    @show kfids
 
     min_bound = Point3f0(maxintfloat())
     max_bound = Point3f(-maxintfloat())
@@ -71,12 +70,9 @@ function main(n_frames::Int)
     slam_positions = Point3f0[]
 
     for kfid in kfids
-        position = (map_manager.frames_map[kfid].wc * base_position)[1:3]
-        # TODO why this happens?
-        all(isapprox.(position, 0.0)) && kfid > 0 && continue
-
-        position = Point3f0(position[[1, 3, 2]])
-        push!(slam_positions, position)
+        pose = map_manager.frames_map[kfid].wc
+        position = (pose * base_position)[1:3]
+        push!(slam_positions, Point3f0(position[[1, 3, 2]]))
 
         min_bound = min.(min_bound, position)
         max_bound = max.(max_bound, position)
@@ -87,11 +83,11 @@ function main(n_frames::Int)
         if m.is_3d
     ]
 
-    @save mappoints_save_file slam_mappoints
-    @save positions_save_file slam_positions
+    # @save mappoints_save_file slam_mappoints
+    # @save positions_save_file slam_positions
 
-    @load mappoints_save_file slam_mappoints
-    @load positions_save_file slam_positions
+    # @load mappoints_save_file slam_mappoints
+    # @load positions_save_file slam_positions
 
     visualizer = Visualizer((height, width))
     markersize = minimum(max_bound .- min_bound) * 1e-2

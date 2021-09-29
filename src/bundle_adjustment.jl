@@ -15,7 +15,7 @@ function bundle_adjustment!(
         poses = reshape(@view(X[1:poses_shift]), 6, n_poses)
         points = reshape(@view(X[(poses_shift + 1):end]), 3, n_points)
 
-        @inbounds @simd for i in 1:n_observations
+        @simd for i in 1:n_observations
             id = (i - 1) * 2
             if ignore_outliers && cache.outliers[i]
                 Y[id + 1] = 0.0
@@ -67,7 +67,7 @@ function _get_jacobian_sparsity(ba_cache, θ, dx, residue_f, ignore_outliers)
     n_parameters = poses_shift + n_points * 3
 
     sparsity = spzeros(Float64, n_observations * 2, n_parameters)
-    @inbounds @simd for i in 1:n_observations
+    @simd for i in 1:n_observations
         # If mappoint is outlier for that observation,
         # then leave zero Jacobian for it, e.g. no updates.
         if !(ignore_outliers && ba_cache.outliers[i])
@@ -102,7 +102,7 @@ function _ba_detect_outliers!(cache, θ, camera::Camera; repr_ϵ, depth_ϵ = 1e-
     points = reshape(@view(θ[(poses_shift + 1):end]), 3, n_points)
 
     n_outliers = 0
-    @inbounds @simd for i in 1:n_observations
+    @simd for i in 1:n_observations
         T = @view(poses[:, cache.poses_ids[i]])
         pt = @view(points[:, cache.points_ids[i]])
         pt = RotZYX(T[1:3]...) * pt .+ T[4:6]
@@ -128,7 +128,7 @@ function pnp_bundle_adjustment(
     ignore_outliers = false
 
     function residue!(Y, X)
-        @inbounds @simd for i in 1:length(points)
+        @simd for i in 1:length(points)
             id = (i - 1) * 2
             if ignore_outliers && outliers[i]
                 Y[id + 1] = 0.0
@@ -152,7 +152,7 @@ function pnp_bundle_adjustment(
 
     # Detect outliers using `fast_result` minimizer.
     n_outliers = 0
-    @inbounds @simd for i in 1:length(points)
+    @simd for i in 1:length(points)
         pt = RotZYX(@view(X1[1:3])...) * points[i] .+ @view(X1[4:6])
         r = pixels[i] .- project(camera, pt)
         outlier = pt[3] < depth_ϵ || (r[1]^2 + r[2]^2) > repr_ϵ
