@@ -9,7 +9,6 @@ function bundle_adjustment!(
 
     ignore_outliers = false
     Y = zeros(Float64, n_observations * 2)
-    dx = zeros(Float64, n_observations * 2)
 
     function residue!(Y, X)
         poses = reshape(@view(X[1:poses_shift]), 6, n_poses)
@@ -37,8 +36,7 @@ function bundle_adjustment!(
 
     # Fast run, to detect outliers.
     θ0 = cache.θ
-    sparsity, g! = _get_jacobian_sparsity(
-        cache, θ0, dx, residue!, ignore_outliers)
+    sparsity, g! = _get_jacobian_sparsity(cache, residue!, ignore_outliers)
 
     Y1 = optimize!(
         LeastSquaresProblem(θ0, Y, residue!, sparsity, g!), optimizer;
@@ -49,8 +47,7 @@ function bundle_adjustment!(
     @info "BA N Outliers $n_outliers."
 
     ignore_outliers = true
-    sparsity2, g2! = _get_jacobian_sparsity(
-        cache, θ1, dx, residue!, ignore_outliers)
+    sparsity2, g2! = _get_jacobian_sparsity(cache, residue!, ignore_outliers)
 
     Y2 = optimize!(
         LeastSquaresProblem(θ1, Y, residue!, sparsity2, g2!), optimizer;
@@ -59,10 +56,10 @@ function bundle_adjustment!(
     copy!(cache.θ, Y2.minimizer)
 end
 
-function _get_jacobian_sparsity(ba_cache, θ, dx, residue_f, ignore_outliers)
-    n_observations = length(ba_cache.observations)
-    n_poses = length(ba_cache.poses_remap)
-    n_points = length(ba_cache.points_remap)
+function _get_jacobian_sparsity(cache, residue_f, ignore_outliers)
+    n_observations = length(cache.observations)
+    n_poses = length(cache.poses_remap)
+    n_points = length(cache.points_remap)
     poses_shift = n_poses * 6
     n_parameters = poses_shift + n_points * 3
 
@@ -70,16 +67,16 @@ function _get_jacobian_sparsity(ba_cache, θ, dx, residue_f, ignore_outliers)
     @simd for i in 1:n_observations
         # If mappoint is outlier for that observation,
         # then leave zero Jacobian for it, e.g. no updates.
-        if !(ignore_outliers && ba_cache.outliers[i])
+        if !(ignore_outliers && cache.outliers[i])
             id = 2 * (i - 1)
 
             # Set Jacobians for point's coordinates.
-            pid = poses_shift + (ba_cache.points_ids[i] - 1) * 3
+            pid = poses_shift + (cache.points_ids[i] - 1) * 3
             sparsity[(id+1):(id+2), (pid+1):(pid+3)] .= 1.0
 
             # Set Jacobians for poses if they are not constant.
-            eid = ba_cache.poses_ids[i]
-            if !ba_cache.θconst[eid]
+            eid = cache.poses_ids[i]
+            if !cache.θconst[eid]
                 eid = (eid - 1) * 6
                 sparsity[(id+1):(id+2), (eid+1):(eid+6)] .= 1.0
             end
@@ -87,8 +84,8 @@ function _get_jacobian_sparsity(ba_cache, θ, dx, residue_f, ignore_outliers)
     end
 
     colorvec = matrix_colors(sparsity)
-    cache = ForwardColorJacCache(residue_f, θ; dx, colorvec, sparsity)
-    grad! = (j, x) -> forwarddiff_color_jacobian!(j, residue_f, x, cache)
+    grad! = (j, x) -> forwarddiff_color_jacobian!(
+        j, residue_f, x; colorvec, sparsity)
     sparsity, grad!
 end
 

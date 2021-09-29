@@ -1,6 +1,5 @@
 struct Observation
     pixel::Point2f
-
     point::Point3f
     pose::NTuple{6, Float64}
 
@@ -127,9 +126,9 @@ function _get_ba_parameters(
             score == 0) && continue
 
         if !(co_kfid in keys(poses))
-            pose_order_id = length(poses) + 1
-            poses[co_kfid] = (pose_order_id, get_cw_ba(co_frame))
-            push!(poses_remap, co_kfid)
+            # pose_order_id = length(poses) + 1
+            # poses[co_kfid] = (pose_order_id, get_cw_ba(co_frame))
+            # push!(poses_remap, co_kfid)
 
             if !(co_kfid in constant_poses)
                 is_constant = score < min_cov_score || co_kfid == 0
@@ -167,8 +166,8 @@ function _get_ba_parameters(
                 end
 
                 in_processed = ob_kfid in keys(poses)
-                in_covmap = ob_kfid in keys(covisibility_map)
                 in_constants = ob_kfid in constant_poses
+                in_covmap = ob_kfid in keys(covisibility_map)
 
                 is_constant = ob_kfid == 0 || in_constants || !in_covmap
                 !is_constant && in_covmap && (is_constant =
@@ -178,10 +177,11 @@ function _get_ba_parameters(
                     pose_order_id, ob_pose = poses[ob_kfid]
                 else
                     ob_pose = get_cw_ba(ob_frame)
-                    is_constant && push!(constant_poses, ob_kfid)
                     pose_order_id = length(poses) + 1
                     poses[ob_kfid] = (pose_order_id, ob_pose)
+
                     push!(poses_remap, ob_kfid)
+                    is_constant && push!(constant_poses, ob_kfid)
                     @assert length(poses_remap) == pose_order_id
                 end
 
@@ -203,6 +203,7 @@ function _get_ba_parameters(
     @info "[ES] BA Points: $n_points."
 
     θ = Vector{Float64}(undef, point_shift + n_points * 3)
+    θ[1:end] .= -420.0
     θconst = Vector{Bool}(undef, n_poses)
     poses_ids = Vector{Int64}(undef, n_observations)
     points_ids = Vector{Int64}(undef, n_observations)
@@ -219,14 +220,23 @@ function _get_ba_parameters(
         if !processed_poses[observation.pose_order]
             processed_poses[observation.pose_order] = true
             p = (observation.pose_order - 1) * 6
+            @assert all(isapprox.(θ[(p + 1):(p + 6)], -420.0))
+
             θ[(p + 1):(p + 6)] .= observation.pose
             θconst[observation.pose_order] = observation.constant
         end
         if !processed_points[observation.point_order]
             processed_points[observation.point_order] = true
             p = point_shift + (observation.point_order - 1) * 3
+            @assert all(isapprox.(θ[(p + 1):(p + 3)], -420.0))
             θ[(p + 1):(p + 3)] .= observation.point
         end
+    end
+    if !all(processed_poses)
+        error("Not all poses were processed: $(sum(processed_poses)) vs $n_poses.")
+    end
+    if !all(processed_points)
+        error("Not all points were processed: $(sum(processed_points)) vs $n_points.")
     end
 
     LocalBACache(
@@ -244,7 +254,16 @@ function _update_ba_parameters!(
         p = (i - 1) * 6
         kf = get_keyframe(map_manager, kfid)
         @assert kf ≢ nothing
-        set_cw_ba!(kf, @view(cache.θ[(p + 1):(p + 6)]))
+
+        new_pose = @view(cache.θ[(p + 1):(p + 6)])
+        if cache.θconst[i]
+            old_pose = get_cw_ba(kf)
+            if !all(isapprox.(old_pose, new_pose))
+                error("Changed constant pose $(kf.id), $(kf.kfid): $new_pose vs $old_pose.")
+            end
+        end
+
+        set_cw_ba!(kf, new_pose)
     end
 
     for i in 1:length(cache.observations)
@@ -293,13 +312,18 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     estimator.params.local_ba_on = true
     covisibility_map = get_covisible_map(new_frame)
     covisibility_map[new_frame.kfid] = new_frame.nb_3d_kpts
+    # # Get up to 5 latest KeyFrames.
+    # co_kfids = sort!(collect(keys(covisibility_map)); rev=true)
+    # co_kfids = co_kfids[1:min(5, length(co_kfids))]
+    # covisibility_map = Dict{Int64, Int64}(
+    #     kfid => covisibility_map[kfid] for kfid in co_kfids)
 
     t1 = time()
 
     cache = _get_ba_parameters(
         estimator.map_manager, new_frame, covisibility_map,
         estimator.params.min_cov_score)
-    bundle_adjustment!(cache, new_frame.camera)
+    bundle_adjustment!(cache, new_frame.camera; show_trace=true)
 
     lock(estimator.map_manager.map_lock)
     try

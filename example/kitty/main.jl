@@ -27,8 +27,7 @@ function main(n_frames::Int)
     camera = SLAM.Camera(
         fx, fy, cx, cy,
         0, 0, 0, 0,
-        height, width,
-    )
+        height, width)
     params = Params(;
         window_size=31, max_distance=50, pyramid_levels=3,
         max_nb_keypoints=1000)
@@ -63,7 +62,7 @@ function main(n_frames::Int)
     kfids = sort!(collect(keys(map_manager.frames_map)))
 
     min_bound = Point3f0(maxintfloat())
-    max_bound = Point3f(-maxintfloat())
+    max_bound = Point3f0(-maxintfloat())
 
     base_position = SVector{4, Float64}(0, 0, 0, 1)
     slam_mappoints = Vector{Point3f0}[]
@@ -72,7 +71,8 @@ function main(n_frames::Int)
     for kfid in kfids
         pose = map_manager.frames_map[kfid].wc
         position = (pose * base_position)[1:3]
-        push!(slam_positions, Point3f0(position[[1, 3, 2]]))
+        position = position[[1, 3, 2]]
+        push!(slam_positions, position)
 
         min_bound = min.(min_bound, position)
         max_bound = max.(max_bound, position)
@@ -94,12 +94,13 @@ function main(n_frames::Int)
 
     lines!(
         visualizer.pc_axis, slam_positions;
-        color=:red, quality=1, linewidth=2,
-    )
+        color=:red, quality=1, linewidth=2)
     meshscatter!(
         visualizer.pc_axis, slam_mappoints;
-        color=:black, markersize, quality=8,
-    )
+        color=:black, markersize, quality=8)
+
+    @show min_bound
+    @show max_bound
 
     xlims!(visualizer.pc_axis, min_bound[1], max_bound[1])
     ylims!(visualizer.pc_axis, min_bound[2], max_bound[2])
