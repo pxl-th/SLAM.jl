@@ -197,10 +197,8 @@ function _get_ba_parameters(
     n_observations = length(observations)
     n_poses, n_points = length(poses), length(map_points)
     point_shift = n_poses * 6
-    @info "[ES] BA Covisibility: $(length(covisibility_map))."
-    @info "[ES] BA Observations: $n_observations."
-    @info "[ES] BA Poses: $n_poses."
-    @info "[ES] BA Points: $n_points."
+    @info "[ES] BA Covisibility: $(length(covisibility_map)):"
+    @info "\t BA Poses: $n_poses | BA Points: $n_points | BA Obs: $n_observations"
 
     θ = Vector{Float64}(undef, point_shift + n_points * 3)
     θ[1:end] .= -420.0
@@ -323,7 +321,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     cache = _get_ba_parameters(
         estimator.map_manager, new_frame, covisibility_map,
         estimator.params.min_cov_score)
-    bundle_adjustment!(cache, new_frame.camera; show_trace=true)
+    bundle_adjustment!(cache, new_frame.camera; show_trace=false)
 
     lock(estimator.map_manager.map_lock)
     try

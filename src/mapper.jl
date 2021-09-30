@@ -153,7 +153,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         right_point = rel_pose_inv * left_point
 
         # Ensure that 3D point is in front of the both cameras.
-        if left_point[3] < 0 || right_point[3] < 0
+        if left_point[3] < 0.1 || right_point[3] < 0.1
             parallax > 20 && remove_mappoint_obs!(
                 mapper.map_manager, observer_kp.id, frame.kfid,
             )
