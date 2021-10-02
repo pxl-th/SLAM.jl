@@ -19,44 +19,51 @@ function fb_tracking!(
     previous_pyramid::ImageTracking.LKPyramid,
     current_pyramid::ImageTracking.LKPyramid,
     keypoints::AbstractVector{Point2f},
-    algorithm::LucasKanade; max_distance::Real = 0.5,
+    algorithm::LucasKanade;
+    displacement::AbstractVector{Point2f} = fill(Point2f(0.0, 0.0), length(keypoints)),
+    max_distance::Real = 0.5,
 )
     isempty(keypoints) && return
 
     # Forward tracking.
-    flow = fill(Point2f(0.0, 0.0), length(keypoints))
-    flow, status = ImageTracking.optflow!(
-        previous_pyramid, current_pyramid, keypoints, flow, algorithm)
+    displacement, status = ImageTracking.optflow!(
+        previous_pyramid, current_pyramid, keypoints, displacement, algorithm)
 
-    valid_correspondences = Vector{Point2f}(undef, sum(status))
-    valid_ids = Dict{Int, Int}() # Mapping to the original points ids.
+    n_good = sum(status) # TODO return n_good from optflow!
+    valid_ids = Vector{Int64}(undef, n_good) # Mapping to the original ids.
+    valid_correspondences = Vector{Point2f}(undef, n_good)
+    back_displacement = Vector{Point2f}(undef, n_good)
 
-    nb_good = 0
-    for i in 1:length(status)
+    c = 1
+    @inbounds for i in 1:length(status)
         status[i] || continue
 
-        new_point = keypoints[i] .+ flow[i]
+        old_kp, Δ = keypoints[i], displacement[i]
+        new_point = old_kp .+ Δ
         new_keypoints[i] = new_point
 
-        nb_good += 1
-        valid_correspondences[nb_good] = new_point
-        valid_ids[nb_good] = i
+        valid_correspondences[c] = new_point
+        back_displacement[c] = -Δ
+        valid_ids[c] = i
+        c += 1
     end
 
     # Backward tracking.
-    back_flow = fill(Point2f(0.0, 0.0), length(valid_correspondences))
-    back_flow, back_status = ImageTracking.optflow!(
+    back_algorithm = LucasKanade(
+        algorithm.iterations; window_size=algorithm.window_size,
+        pyramid_levels=1)
+    back_displacement, back_status = ImageTracking.optflow!(
         current_pyramid, previous_pyramid, valid_correspondences,
-        back_flow, algorithm)
-    for i in 1:length(back_status)
+        back_displacement, back_algorithm)
+
+    @inbounds for i in 1:length(back_status)
         idx = valid_ids[i]
         back_status[i] || (status[idx] = false; continue)
 
-        new_point = valid_correspondences[i] .+ back_flow[i]
+        new_point = valid_correspondences[i] .+ back_displacement[i]
         norm(keypoints[idx] .- new_point) ≥ max_distance &&
             (status[idx] = false; continue)
     end
-
     new_keypoints, status
 end
 
@@ -64,6 +71,7 @@ function fb_tracking!(
     previous_pyramid::ImageTracking.LKPyramid,
     current_pyramid::ImageTracking.LKPyramid,
     keypoints::AbstractVector{Point2f};
+    displacement::AbstractVector{Point2f} = fill(Point2f(0.0, 0.0), length(keypoints)),
     nb_iterations::Int = 30, window_size::Int = 11, pyramid_levels::Int = 3,
     max_distance::Real = 0.5,
 )
@@ -71,5 +79,5 @@ function fb_tracking!(
     algorithm = LucasKanade(nb_iterations; window_size, pyramid_levels)
     fb_tracking!(
         new_keypoints, previous_pyramid, current_pyramid,
-        keypoints, algorithm; max_distance)
+        keypoints, algorithm; displacement, max_distance)
 end
