@@ -12,6 +12,7 @@ mutable struct Keypoint
     Position of a keypoint in 3D space in `(x, y, z = 1)` format.
     """
     position::Point3f
+    descriptor::BitVector
     is_3d::Bool
 end
 
@@ -159,10 +160,14 @@ function get_keypoint_unpx(f::Frame, kpid)
     end
 end
 
-function add_keypoint!(f::Frame, point, id; is_3d::Bool = false)
+function add_keypoint!(
+    f::Frame, point, id; descriptor::BitVector = BitVector(),
+    is_3d::Bool = false,
+)
     undistorted_point = undistort_point(f.camera, point)
     position = backproject(f.camera, undistorted_point)
-    add_keypoint!(f, Keypoint(id, point, undistorted_point, position, is_3d))
+    add_keypoint!(f, Keypoint(
+        id, point, undistorted_point, position, descriptor, is_3d))
 end
 
 function add_keypoint!(f::Frame, keypoint::Keypoint)

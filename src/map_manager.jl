@@ -89,25 +89,26 @@ function extract_keypoints!(m::MapManager, image)
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
 
-    add_keypoints_to_frame!(m, m.current_frame, keypoints)
+    descriptors, keypoints = describe(m.extractor, image, keypoints)
+    add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
 
     vimage = RGB{Float64}.(image)
     draw_keypoints!(vimage, m.current_frame)
     save("/home/pxl-th/projects/slam-data/images/frame-$(m.current_frame.id).png", vimage)
 end
 
-function add_keypoints_to_frame!(m::MapManager, frame, keypoints)
+function add_keypoints_to_frame!(m::MapManager, frame, keypoints, descriptors)
     lock(m.mappoint_lock) do
-        for kp in keypoints
+        for (kp, dp) in zip(keypoints, descriptors)
             # m.current_mappoint_id is incremented in `add_mappoint!`.
             add_keypoint!(frame, Point2f(kp[1], kp[2]), m.current_mappoint_id)
-            add_mappoint!(m)
+            add_mappoint!(m, dp)
         end
     end
 end
 
-@inline function add_mappoint!(m::MapManager)
-    mp = MapPoint(m.current_mappoint_id, m.current_keyframe_id)
+@inline function add_mappoint!(m::MapManager, descriptor)
+    mp = MapPoint(m.current_mappoint_id, m.current_keyframe_id, descriptor)
     m.map_points[m.current_mappoint_id] = mp
     m.current_mappoint_id += 1
     m.nb_mappoints += 1
