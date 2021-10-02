@@ -143,8 +143,7 @@ function pnp_bundle_adjustment(
 
     fast_result = optimize!(
         LeastSquaresProblem(;x=X0, y=Y, f! = residue!),
-        LevenbergMarquardt(); iterations, show_trace,
-    )
+        LevenbergMarquardt(); iterations=5, show_trace)
     X1 = fast_result.minimizer
 
     # Detect outliers using `fast_result` minimizer.
@@ -160,16 +159,14 @@ function pnp_bundle_adjustment(
     if length(points) - n_outliers < 5
         return (
             SMatrix{4, 4, Float64}(I), initial_error, fast_result.ssr,
-            outliers, n_outliers,
-        )
+            outliers, n_outliers)
     end
 
     Y .= 0.0
     ignore_outliers = true
     result = optimize!(
         LeastSquaresProblem(;x=X1, y=Y, f! = residue!),
-        LevenbergMarquardt(); iterations, show_trace,
-    )
+        LevenbergMarquardt(); iterations, show_trace)
 
     new_pose = to_4x4(RotZYX(result.minimizer[1:3]...), result.minimizer[4:6])
     new_pose, initial_error, result.ssr, outliers, n_outliers

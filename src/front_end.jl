@@ -17,13 +17,11 @@ end
 function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
     empty_pyr = ImageTracking.LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],
-        nothing, nothing, nothing, nothing, nothing,
-    )
+        nothing, nothing, nothing, nothing, nothing)
     FrontEnd(
         frame, MotionModel(), map_manager, params,
         Matrix{Gray{Float64}}(undef, 0, 0), Matrix{Gray{Float64}}(undef, 0, 0),
-        empty_pyr, empty_pyr, empty_pyr, false,
-    )
+        empty_pyr, empty_pyr, empty_pyr, false)
 end
 
 function track!(fe::FrontEnd, image, time)
@@ -32,7 +30,7 @@ function track!(fe::FrontEnd, image, time)
     lock(fe.map_manager.map_lock)
     try
         is_kf_required = track_mono!(fe, image, time)
-        @info "Pose $(fe.current_frame.id): $(fe.current_frame.wc[1:3, 4])"
+        @info "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
 
         if is_kf_required
             create_keyframe!(fe.map_manager, image)
@@ -53,16 +51,11 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
     # If it's the first frame, then KeyFrame is always needed.
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
+    @info "[FE] Old Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
     set_wc!(fe.current_frame, fe.motion_model(fe.current_frame.wc, time))
+    @info "[FE] New Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
 
     klt_tracking!(fe)
-    # Epipolar filtering to remove outliers.
-    pose_5pt = compute_pose_5pt!(
-        fe; min_parallax=2.0 * fe.params.max_reprojection_error,
-        use_motion_model=true,
-    )
-    fe.map_manager.nb_keyframes > 2 && pose_5pt ≢ nothing &&
-        set_cw!(fe.current_frame, pose_5pt)
 
     if !fe.params.vision_initialized
         if fe.current_frame.nb_keypoints < 50
@@ -79,7 +72,17 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
         end
     end
 
+    # Epipolar filtering to remove outliers.
+    # In case P3P fails this pose will be used.
+    pose_5pt = compute_pose_5pt!(
+        fe; min_parallax=2.0 * fe.params.max_reprojection_error,
+        use_motion_model=true)
+
+    fe.map_manager.nb_keyframes > 2 && pose_5pt ≢ nothing &&
+        set_cw!(fe.current_frame, pose_5pt)
+
     compute_pose!(fe)
+
     # Update motion model from estimated pose.
     update!(fe.motion_model, fe.current_frame.wc, time)
     check_new_kf_required(fe)
@@ -94,7 +97,8 @@ function compute_pose!(fe::FrontEnd)
         return false
     end
 
-    do_p3p = fe.p3p_required || fe.params.do_p3p
+    do_p3p = true
+    # do_p3p = fe.p3p_required && fe.params.do_p3p
 
     p3p_pixels = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
     p3p_pdn_positions = Vector{Point3f}(undef, fe.current_frame.nb_3d_kpts)
@@ -122,20 +126,21 @@ function compute_pose!(fe::FrontEnd)
     p3p_kpids = @view(p3p_kpids[1:i])
 
     if do_p3p
+        @info "[FE] P3P Ransac..."
         # P3P computes world → camera projection.
         res = p3p_ransac(
             p3p_3d_points, p3p_pixels, p3p_pdn_positions,
             fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
         )
         if res ≡ nothing
-            @warn "[Front-End] P3P Ransac returned Nothing."
+            @warn "[FE] P3P Ransac returned Nothing."
             fe |> reset_frame!
             return false
         end
 
         n_inliers, model = res
         if n_inliers < 5 || model ≡ nothing
-            @warn "[Front-End] Not enough inliers for P3P pose estimation."
+            @warn "[FE] P3P too few inliers - resetting!"
             fe |> reset_frame!
             return false
         end
@@ -168,9 +173,11 @@ function compute_pose!(fe::FrontEnd)
 
     new_T, init_error, res_error, outliers, n_outliers = pnp_bundle_adjustment(
         fe.current_frame.camera, fe.current_frame.cw,
-        p3p_pixels, p3p_3d_points; iterations=10,
+        p3p_pixels, p3p_3d_points;
+        iterations=10, show_trace=false, repr_ϵ=fe.params.max_reprojection_error,
     )
     if length(p3p_3d_points) - n_outliers < 5 || res_error > init_error
+        @warn "[FE] P3P BA too few inliers - resetting!"
         fe.p3p_required = true
         fe |> reset_frame!
         return false
@@ -197,8 +204,7 @@ function compute_pose_5pt!(
 
     # Setup Essential matrix computation.
     previous_keyframe = get(
-        fe.map_manager.frames_map, fe.current_frame.kfid, nothing,
-    )
+        fe.map_manager.frames_map, fe.current_frame.kfid, nothing)
     previous_keyframe ≡ nothing && return nothing
     R_compensation = get_Rcw(previous_keyframe) * get_Rwc(fe.current_frame)
 
@@ -248,8 +254,8 @@ function compute_pose_5pt!(
     # `P` is `cw`: transforms from world (previous frame) to current frame.
     n_inliers, (_, P, inliers, _) = five_point_ransac(
         previous_points, current_points,
-        fe.current_frame.camera.K, fe.current_frame.camera.K,
-    )
+        fe.current_frame.camera.K, fe.current_frame.camera.K;
+        max_repr_error=fe.params.max_reprojection_error)
     if n_inliers < 5
         @warn "[Front-End] Not enough inliers ($n_inliers) for the " *
             "5pt Essential Matrix."
@@ -286,12 +292,10 @@ to filter out outliers and check if there is enough inliers to proceed.
 function check_ready_for_init!(fe::FrontEnd)
     avg_parallax = compute_parallax(
         fe, fe.current_frame.kfid;
-        compensate_rotation=false, median_parallax=true,
-    )
+        compensate_rotation=false, median_parallax=true)
     avg_parallax ≤ fe.params.initial_parallax && return false
     pose = compute_pose_5pt!(
-        fe; min_parallax=fe.params.initial_parallax, use_motion_model=false,
-    )
+        fe; min_parallax=fe.params.initial_parallax, use_motion_model=false)
     ready = pose ≢ nothing
     ready && set_cw!(fe.current_frame, pose)
     ready
@@ -392,12 +396,13 @@ function compute_parallax(
 end
 
 function preprocess!(fe::FrontEnd, image)
+    # image = adjust_histogram(image, AdaptiveEqualization())
+
     fe.previous_image = fe.current_image
     fe.previous_pyramid = fe.current_pyramid
 
     fe.current_pyramid = ImageTracking.LKPyramid(
-        image, fe.params.pyramid_levels,
-    )
+        image, fe.params.pyramid_levels)
     fe.current_image = image
 end
 
@@ -436,6 +441,8 @@ function klt_tracking!(fe::FrontEnd)
         i3d += 1
     end
 
+    @info "[FE] 3D Points WILL TRACKE: $i3d"
+
     i3d -= 1
     priors_3d = @view(priors_3d[1:i3d])
     prior_3d_pixels = @view(prior_3d_pixels[1:i3d])
@@ -446,15 +453,13 @@ function klt_tracking!(fe::FrontEnd)
         new_keypoints, status = fb_tracking!(
             fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
             pyramid_levels=1, window_size=fe.params.window_size,
-            max_distance=fe.params.max_ktl_distance,
-        )
+            max_distance=fe.params.max_ktl_distance)
 
         nb_good = 0
         for j in 1:length(new_keypoints)
             if status[j]
                 update_keypoint!(
-                    fe.current_frame, prior_3d_ids[j], new_keypoints[j],
-                )
+                    fe.current_frame, prior_3d_ids[j], new_keypoints[j])
                 nb_good += 1
             else
                 # If failed, re-add keypoint to try with the full pyramid.
@@ -483,8 +488,7 @@ function klt_tracking!(fe::FrontEnd)
         fe.previous_pyramid, fe.current_pyramid, prior_pixels;
         pyramid_levels=fe.params.pyramid_levels,
         window_size=fe.params.window_size,
-        max_distance=fe.params.max_ktl_distance,
-    )
+        max_distance=fe.params.max_ktl_distance)
 
     # Either update or remove keypoints.
     for i in 1:length(new_keypoints)

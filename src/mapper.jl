@@ -26,8 +26,7 @@ function Mapper(params::Params, map_manager::MapManager, frame::Frame)
     Mapper(
         params, map_manager, estimator,
         frame, KeyFrame[], false, false,
-        estimator_thread, ReentrantLock(),
-    )
+        estimator_thread, ReentrantLock())
 end
 
 function run!(mapper::Mapper)
@@ -91,13 +90,12 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         return
     end
     K = to_4x4(frame.camera.K)
-    P1 = K * SMatrix{4, 4, Float64}(I)
+    P1 = K * SMatrix{4, 4, Float64, 16}(I)
 
     good, candidates = 0, 0
     rel_kfid = -1
     # frame -> observer key frame.
     rel_pose::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
-    # observer key frame -> frame.
     rel_pose_inv::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
 
     cam = frame.camera
@@ -122,7 +120,10 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
 
         # Get 1st KeyFrame observation for the MapPoint.
         observer_kf = get_keyframe(mapper.map_manager, kfid)
-        observer_kf ≡ nothing && continue # TODO should this be possible?
+        if observer_kf ≡ nothing
+            @error "[MP] Missing observer for triangulation."
+            continue # TODO should this be possible?
+        end
 
         # Compute relative motion between new KF & observer KF.
         # Don't recompute if the frame's ids don't change.
@@ -146,8 +147,12 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Compute 3D pose and check if it is good.
         # Note, that we use inverted relative pose.
         left_point = iterative_triangulation(
-            obup[[2, 1]], kpup[[2, 1]], P1, K * rel_pose_inv,
-        )
+            obup[[2, 1]], kpup[[2, 1]], P1, K * rel_pose_inv)
+        if left_point[4] ≈ 0.0 || left_point[4] > 1e6
+            @error "[MP] Failed triangulation, singular value."
+            continue
+        end
+
         left_point *= 1.0 / left_point[4]
         # Project into the right camera (new KeyFrame).
         right_point = rel_pose_inv * left_point
@@ -155,8 +160,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         # Ensure that 3D point is in front of the both cameras.
         if left_point[3] < 0.1 || right_point[3] < 0.1
             parallax > 20 && remove_mappoint_obs!(
-                mapper.map_manager, observer_kp.id, frame.kfid,
-            )
+                mapper.map_manager, observer_kp.id, frame.kfid)
             continue
         end
 
@@ -165,8 +169,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         rrepr = norm(project(cam, right_point[1:3]) .- kpup)
         if lrepr > max_error || rrepr > max_error
             parallax > 20 && remove_mappoint_obs!(
-                mapper.map_manager, observer_kp.id, frame.kfid,
-            )
+                mapper.map_manager, observer_kp.id, frame.kfid)
             continue
         end
         # 3D pose is good, update MapPoint and related Frames.

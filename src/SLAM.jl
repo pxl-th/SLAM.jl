@@ -48,24 +48,21 @@ function to_4x4(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
-        0,       0,       0,       1,
-    )
+        0,       0,       0,       1)
 end
 function to_4x4(m::SMatrix{3, 4, T})::SMatrix{4, 4, T} where T
     SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
-        m[1, 4], m[2, 4], m[3, 4], 1,
-    )
+        m[1, 4], m[2, 4], m[3, 4], 1)
 end
 function to_4x4(m, t)
     SMatrix{4, 4, Float64}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
-        t[1],    t[2],    t[3],    1,
-    )
+        t[1],    t[2],    t[3],    1)
 end
 
 include("camera.jl")
@@ -114,8 +111,7 @@ function SlamManager(params::Params, camera::Camera)
     frame = Frame(;camera, cell_size=params.max_distance)
     extractor = Extractor(
         params.max_nb_keypoints, avoidance_radius,
-        grid_resolution, params.max_distance,
-    )
+        grid_resolution, params.max_distance)
 
     map_manager = MapManager(params, frame, extractor)
     front_end = FrontEnd(params, frame, map_manager)
@@ -128,8 +124,7 @@ function SlamManager(params::Params, camera::Camera)
         params,
         image_queue, time_queue, frame, frame.id,
         front_end, map_manager, mapper, extractor,
-        camera, false, mapper_thread, ReentrantLock(),
-    )
+        camera, false, mapper_thread, ReentrantLock())
 end
 
 function add_image!(sm::SlamManager, image, time)
@@ -159,7 +154,6 @@ function run!(sm::SlamManager)
     while !(sm.exit_required)
         image, time = get_image!(sm)
         if image ≡ nothing
-            @debug "[SM] No new image, waiting..."
             sleep(1e-2)
             continue
         end
@@ -196,6 +190,16 @@ function reset!(sm::SlamManager)
     sm.front_end |> reset!
     sm.map_manager |> reset!
     @warn "[Slam Manager] Reset applied."
+end
+
+function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
+    radius = 2
+    for kp in values(frame.keypoints)
+        in_image(frame.camera, kp.pixel) || continue
+        color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
+        draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
+    end
+    image
 end
 
 precompile(track!, (FrontEnd, Matrix{Float64}, Float64))

@@ -303,6 +303,13 @@ function get_cw_ba(f::Frame)::NTuple{6, Float64}
     end
 end
 
+function get_wc_ba(f::Frame)::NTuple{6, Float64}
+    lock(f.pose_lock) do
+        r = RotXYZ(f.wc[1:3, 1:3])
+        (r.theta1, r.theta2, r.theta3, f.wc[1:3, 4]...)
+    end
+end
+
 function set_cw_ba!(f::Frame, θ)
     lock(f.pose_lock) do
         set_cw!(f, to_4x4(RotZYX(θ[1:3]...), θ[4:6]))

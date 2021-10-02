@@ -57,7 +57,7 @@ function run!(estimator::Estimator)
 
         try
             local_bundle_adjustment!(estimator, new_kf)
-            # map_filtering!(estimator, new_kf)
+            map_filtering!(estimator, new_kf)
         catch e
             showerror(stdout, e); println()
             display(stacktrace(catch_backtrace())); println()
@@ -95,8 +95,7 @@ function LocalBACache(
     outliers = Vector{Bool}(undef, length(observations))
     LocalBACache(
         observations, outliers, bad_keypoints, θ, θconst, pixels,
-        poses_ids, points_ids, poses_remap, points_remap,
-    )
+        poses_ids, points_ids, poses_remap, points_remap)
 end
 
 function _get_ba_parameters(
@@ -126,10 +125,6 @@ function _get_ba_parameters(
             score == 0) && continue
 
         if !(co_kfid in keys(poses))
-            # pose_order_id = length(poses) + 1
-            # poses[co_kfid] = (pose_order_id, get_cw_ba(co_frame))
-            # push!(poses_remap, co_kfid)
-
             if !(co_kfid in constant_poses)
                 is_constant = score < min_cov_score || co_kfid == 0
                 is_constant && (push!(constant_poses, co_kfid); continue)
@@ -148,7 +143,7 @@ function _get_ba_parameters(
             mp_position = get_position(mp)
             map_points[kpid] = (mp_order_id, mp_position)
             push!(points_remap, kpid)
-            @assert length(points_remap) == mp_order_id
+            # @assert length(points_remap) == mp_order_id
 
             # For each observer, add observation: px ← (mp, pose).
             for ob_kfid in get_observers(mp)
@@ -182,14 +177,13 @@ function _get_ba_parameters(
 
                     push!(poses_remap, ob_kfid)
                     is_constant && push!(constant_poses, ob_kfid)
-                    @assert length(poses_remap) == pose_order_id
+                    # @assert length(poses_remap) == pose_order_id
                 end
 
                 push!(observations, Observation(
                     ob_pixel, mp_position, ob_pose,
                     mp_order_id, pose_order_id,
-                    is_constant, in_covmap, ob_kfid, kpid,
-                ))
+                    is_constant, in_covmap, ob_kfid, kpid))
             end
         end
     end
@@ -201,7 +195,6 @@ function _get_ba_parameters(
     @info "\t BA Poses: $n_poses | BA Points: $n_points | BA Obs: $n_observations"
 
     θ = Vector{Float64}(undef, point_shift + n_points * 3)
-    θ[1:end] .= -420.0
     θconst = Vector{Bool}(undef, n_poses)
     poses_ids = Vector{Int64}(undef, n_observations)
     points_ids = Vector{Int64}(undef, n_observations)
@@ -218,7 +211,6 @@ function _get_ba_parameters(
         if !processed_poses[observation.pose_order]
             processed_poses[observation.pose_order] = true
             p = (observation.pose_order - 1) * 6
-            @assert all(isapprox.(θ[(p + 1):(p + 6)], -420.0))
 
             θ[(p + 1):(p + 6)] .= observation.pose
             θconst[observation.pose_order] = observation.constant
@@ -226,7 +218,6 @@ function _get_ba_parameters(
         if !processed_points[observation.point_order]
             processed_points[observation.point_order] = true
             p = point_shift + (observation.point_order - 1) * 3
-            @assert all(isapprox.(θ[(p + 1):(p + 3)], -420.0))
             θ[(p + 1):(p + 3)] .= observation.point
         end
     end
@@ -239,8 +230,7 @@ function _get_ba_parameters(
 
     LocalBACache(
         observations, bad_keypoints, θ, θconst, pixels,
-        poses_ids, points_ids, poses_remap, points_remap,
-    )
+        poses_ids, points_ids, poses_remap, points_remap)
 end
 
 function _update_ba_parameters!(
@@ -251,16 +241,15 @@ function _update_ba_parameters!(
     for (i, kfid) in enumerate(cache.poses_remap)
         p = (i - 1) * 6
         kf = get_keyframe(map_manager, kfid)
-        @assert kf ≢ nothing
-
         new_pose = @view(cache.θ[(p + 1):(p + 6)])
+
         if cache.θconst[i]
             old_pose = get_cw_ba(kf)
             if !all(isapprox.(old_pose, new_pose))
                 error("Changed constant pose $(kf.id), $(kf.kfid): $new_pose vs $old_pose.")
             end
+            continue
         end
-
         set_cw_ba!(kf, new_pose)
     end
 
@@ -277,13 +266,13 @@ function _update_ba_parameters!(
 
     for (i, mpid) in enumerate(cache.points_remap)
         mp = get_mappoint(map_manager, mpid)
-        @assert mp ≢ nothing
         if is_bad!(mp)
             remove_mappoint!(map_manager, mpid)
             mpid in cache.bad_keypoints && pop!(cache.bad_keypoints, mpid)
         else
             p = points_shift + (i - 1) * 3
-            set_position!(mp, @view(cache.θ[(p + 1):(p + 3)]))
+            new_position = @view(cache.θ[(p + 1):(p + 3)])
+            set_position!(mp, new_position)
         end
     end
 
@@ -310,7 +299,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     estimator.params.local_ba_on = true
     covisibility_map = get_covisible_map(new_frame)
     covisibility_map[new_frame.kfid] = new_frame.nb_3d_kpts
-    # # Get up to 5 latest KeyFrames.
+    # Get up to 5 latest KeyFrames.
     # co_kfids = sort!(collect(keys(covisibility_map)); rev=true)
     # co_kfids = co_kfids[1:min(5, length(co_kfids))]
     # covisibility_map = Dict{Int64, Int64}(

@@ -27,15 +27,13 @@ function Camera(
     K = SMatrix{3, 3, Float64, 9}(
         fx, 0.0, 0.0,
         0.0, fy, 0.0,
-        cx, cy, 1.0,
-    )
+        cx, cy, 1.0)
     iK = K |> inv
 
     Camera(
         fx, fy, cx, cy,
         k1, k2, p1, p2,
-        K, iK, height, width,
-    )
+        K, iK, height, width)
 end
 
 """
@@ -51,8 +49,7 @@ function project(c::Camera, point)
     inv_z = 1.0 / point[3]
     Point2f(
         c.fy * point[2] * inv_z + c.cy,
-        c.fx * point[1] * inv_z + c.cx,
-    )
+        c.fx * point[1] * inv_z + c.cx)
 end
 
 """
@@ -85,8 +82,7 @@ in_image(c::Camera, point::Point2) = all(1 .≤ point .≤ (c.height, c.width))
 function undistort_point(c::Camera, point::Point2)
     normalized = Point2f(
         (point[1] - c.cy) / c.fy,
-        (point[2] - c.cx) / c.fx,
-    )
+        (point[2] - c.cx) / c.fx)
     undistort_pdn_point(c, normalized)
 end
 

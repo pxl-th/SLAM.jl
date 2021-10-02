@@ -22,15 +22,12 @@ function main(n_frames::Int)
 
     fx, fy = dataset.K[1, 1], dataset.K[2, 2]
     cx, cy = dataset.K[1:2, 3]
-    # height, width = 376, 1241
-    height, width = 370, 1226
-    camera = SLAM.Camera(
-        fx, fy, cx, cy,
-        0, 0, 0, 0,
-        height, width)
+    height, width = 376, 1241
+    # height, width = 370, 1226
+    camera = SLAM.Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
     params = Params(;
-        window_size=31, max_distance=50, pyramid_levels=3,
-        max_nb_keypoints=1000)
+        window_size=9, max_distance=35, pyramid_levels=3,
+        max_nb_keypoints=1000, max_reprojection_error=3.0)
     slam_manager = SlamManager(params, camera)
     slam_manager_thread = Threads.@spawn run!(slam_manager)
 
@@ -43,10 +40,12 @@ function main(n_frames::Int)
 
         q_size = get_queue_size(slam_manager)
         f_size = length(slam_manager.mapper.estimator.frame_queue)
-        while q_size > 0 || f_size > 0
+        m_size = length(slam_manager.mapper.keyframe_queue)
+        while q_size > 0 || f_size > 0 || m_size > 0
             sleep(1e-2)
             q_size = get_queue_size(slam_manager)
             f_size = length(slam_manager.mapper.estimator.frame_queue)
+            m_size = length(slam_manager.mapper.keyframe_queue)
         end
         sleep(1e-2)
     end
@@ -80,8 +79,7 @@ function main(n_frames::Int)
     slam_mappoints = [
         Point3f0(m.position[[1, 3, 2]])
         for m in values(map_manager.map_points)
-        if m.is_3d
-    ]
+        if m.is_3d]
 
     # @save mappoints_save_file slam_mappoints
     # @save positions_save_file slam_positions

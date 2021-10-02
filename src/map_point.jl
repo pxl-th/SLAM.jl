@@ -27,8 +27,7 @@ end
 function MapPoint(::Val{:invalid})
     MapPoint(
         -1, -1, OrderedSet{Int64}(), Point3f(0, 0, 0),
-        0, false, false, ReentrantLock(),
-    )
+        0, false, false, ReentrantLock())
 end
 
 function MapPoint(id, kfid, is_observed::Bool = true)
@@ -38,8 +37,7 @@ function MapPoint(id, kfid, is_observed::Bool = true)
 
     MapPoint(
         id, kfid, observed_keyframes_ids,
-        position, is_3d, is_observed, ReentrantLock(),
-    )
+        position, is_3d, is_observed, ReentrantLock())
 end
 
 @inline is_valid(m::MapPoint)::Bool = m.id != -1

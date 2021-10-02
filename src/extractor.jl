@@ -82,8 +82,7 @@ function detect(
         x_range = (x_shift + 1):min(width, (x + 1) * e.cell_size)
 
         sub_features, _, n_detected = _shi_tomasi(
-            @view(image[y_range, x_range]), n_cell_detect,
-        )
+            @view(image[y_range, x_range]), n_cell_detect)
         n_detected == 0 && continue
         for sk in Keypoints(sub_features)
             push!(features, CartesianIndex{2}(sk[1] + y_shift, sk[2] + x_shift))
