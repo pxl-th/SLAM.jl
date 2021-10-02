@@ -32,6 +32,10 @@ function track!(fe::FrontEnd, image, time)
         is_kf_required = track_mono!(fe, image, time)
         @info "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
 
+        vimage = RGB{Float64}.(fe.current_image)
+        draw_keypoints!(vimage, fe.current_frame)
+        save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
+
         if is_kf_required
             create_keyframe!(fe.map_manager, image)
             fe.keyframe_pyramid = fe.current_pyramid
@@ -75,7 +79,7 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
     # Epipolar filtering to remove outliers.
     # In case P3P fails this pose will be used.
     pose_5pt = compute_pose_5pt!(
-        fe; min_parallax=2.0 * fe.params.max_reprojection_error,
+        fe; min_parallax=5.0, #2.0 * fe.params.max_reprojection_error,
         use_motion_model=true)
 
     fe.map_manager.nb_keyframes > 2 && pose_5pt ≢ nothing &&
@@ -292,7 +296,8 @@ to filter out outliers and check if there is enough inliers to proceed.
 function check_ready_for_init!(fe::FrontEnd)
     avg_parallax = compute_parallax(
         fe, fe.current_frame.kfid;
-        compensate_rotation=false, median_parallax=true)
+        compensate_rotation=false, median_parallax=false)
+    @info "[FE] Initial parallax $avg_parallax vs $(fe.params.initial_parallax)."
     avg_parallax ≤ fe.params.initial_parallax && return false
     pose = compute_pose_5pt!(
         fe; min_parallax=fe.params.initial_parallax, use_motion_model=false)
@@ -407,11 +412,10 @@ function preprocess!(fe::FrontEnd, image)
 end
 
 function klt_tracking!(fe::FrontEnd)
-    priors = Vector{Point2f}(undef, fe.current_frame.nb_keypoints)
     prior_ids = Vector{Int64}(undef, fe.current_frame.nb_keypoints)
     prior_pixels = Vector{Point2f}(undef, fe.current_frame.nb_keypoints)
 
-    priors_3d = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
+    displacements_3d = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
     prior_3d_ids = Vector{Int64}(undef, fe.current_frame.nb_3d_kpts)
     prior_3d_pixels = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
 
@@ -421,7 +425,6 @@ function klt_tracking!(fe::FrontEnd)
     for kp in values(fe.current_frame.keypoints)
         if !(fe.params.use_prior && kp.is_3d)
             # Init prior with previous pixel positions.
-            priors[i] = kp.pixel
             prior_pixels[i] = kp.pixel
             prior_ids[i] = kp.id
             i += 1
@@ -435,7 +438,7 @@ function klt_tracking!(fe::FrontEnd)
         )
         in_image(fe.current_frame.camera, projection) || continue
 
-        priors_3d[i3d] = projection
+        displacements_3d[i3d] = projection .- kp.pixel
         prior_3d_pixels[i3d] = kp.pixel
         prior_3d_ids[i3d] = kp.id
         i3d += 1
@@ -444,12 +447,12 @@ function klt_tracking!(fe::FrontEnd)
     @info "[FE] 3D Points WILL TRACKE: $i3d"
 
     i3d -= 1
-    priors_3d = @view(priors_3d[1:i3d])
+    displacements_3d = @view(displacements_3d[1:i3d])
     prior_3d_pixels = @view(prior_3d_pixels[1:i3d])
     prior_3d_ids = @view(prior_3d_ids[1:i3d])
 
     # First, track 3d keypoints, if using prior.
-    if fe.params.use_prior && !isempty(priors_3d)
+    if fe.params.use_prior && !isempty(displacements_3d)
         new_keypoints, status = fb_tracking!(
             fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
             pyramid_levels=1, window_size=fe.params.window_size,
@@ -463,30 +466,27 @@ function klt_tracking!(fe::FrontEnd)
                 nb_good += 1
             else
                 # If failed, re-add keypoint to try with the full pyramid.
-                priors[i] = priors_3d[j]
                 prior_pixels[i] = prior_3d_pixels[j]
                 prior_ids[i] = prior_3d_ids[j]
                 i += 1
             end
         end
-        # If motion model is wrong, require P3P next,
-        # without using any priors.
-        if nb_good < 0.33 * length(priors_3d)
+        @info "[FE] 3D Points tracked $nb_good."
+        # If motion model is wrong, require P3P next.
+        if nb_good < 0.33 * length(displacements_3d)
             fe.p3p_required = true
         end
     end
 
     i -= 1
-    priors = @view(priors[1:i])
     prior_pixels = @view(prior_pixels[1:i])
     prior_ids = @view(prior_ids[1:i])
 
-
     # Track other prior keypoints, if any.
-    isempty(priors) && return
+    isempty(prior_pixels) && return
     new_keypoints, status = fb_tracking!(
         fe.previous_pyramid, fe.current_pyramid, prior_pixels;
-        pyramid_levels=fe.params.pyramid_levels,
+        pyramid_levels=1, #fe.params.pyramid_levels,
         window_size=fe.params.window_size,
         max_distance=fe.params.max_ktl_distance)
 
