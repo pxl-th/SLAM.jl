@@ -100,7 +100,7 @@ end
 
 function _get_ba_parameters(
     map_manager::MapManager, frame::Frame,
-    covisibility_map::Dict{Int64, Int64}, min_cov_score,
+    covisibility_map::OrderedDict{Int64, Int64}, min_cov_score,
 )
     # poses: kfid → (order id, θ).
     poses = Dict{Int64, Tuple{Int64, NTuple{6, Float64}}}()

@@ -60,7 +60,7 @@ mutable struct Frame
     Map of covisible KeyFrames.
     KFid → Number of MapPoints that this Frame shared with `KFid` frame.
     """
-    covisible_kf::Dict{Int64, Int64}
+    covisible_kf::OrderedDict{Int64, Int64}
     local_map_ids::Set{Int64}
 
     keypoints_lock::ReentrantLock
@@ -94,7 +94,7 @@ function Frame(;
         keypoints, grid,
         nb_occupied_cells, cell_size,
         nb_keypoints, 0, 0,
-        Dict{Int64, Int64}(), Set{Int64}(),
+        OrderedDict{Int64, Int64}(), Set{Int64}(),
         keypoints_lock, pose_lock, grid_lock, covisibility_lock,
     )
 end
@@ -388,6 +388,63 @@ function remove_covisible_kf!(f::Frame, kfid)
     lock(f.covisibility_lock) do
         kfid in keys(f.covisible_kf) && pop!(f.covisible_kf, kfid)
     end
+end
+
+function is_observing_kp(f::Frame, kpid)
+    lock(f.keypoints_lock) do
+        kpid in keys(f.keypoints)
+    end
+end
+
+function get_surrounding_keypoints(f::Frame, kp::Keypoint)
+    keypoints = Vector{Keypoint}(undef, 0)
+    sizehint!(keypoints, 20)
+    kpi = to_cartesian(kp.pixel, f.cell_size)
+
+    lock(f.keypoints_lock)
+    lock(f.grid_lock)
+    try
+        for r in (kpi[1] - 1):(kpi[1] + 1), c in (kpi[2] - 1):(kpi[2] + 1)
+            (r < 1 || c < 1 || r > size(f.keypoints_grid, 1)
+                || c > size(f.keypoints_grid, 2)) && continue
+
+            for cell_kpid in f.keypoints_grid[r, c]
+                cell_kpid == kp.id && continue
+                cell_kp = get(f, cell_kpid, nothing)
+                cell_kp ≡ nothing || push!(keypoints, cell_kp)
+            end
+        end
+    finally
+        unlock(f.grid_lock)
+        unlock(f.keypoints_lock)
+    end
+
+    keypoints
+end
+
+function get_surrounding_keypoints(f::Frame, pixel::Point2f)
+    keypoints = Vector{Keypoint}(undef, 0)
+    sizehint!(keypoints, 20)
+    kpi = to_cartesian(pixel, f.cell_size)
+
+    lock(f.keypoints_lock)
+    lock(f.grid_lock)
+    try
+        for r in (kpi[1] - 1):(kpi[1] + 1), c in (kpi[2] - 1):(kpi[2] + 1)
+            (r < 1 || c < 1 || r > size(f.keypoints_grid, 1)
+                || c > size(f.keypoints_grid, 2)) && continue
+
+            for cell_kpid in f.keypoints_grid[r, c]
+                cell_kp = get(f.keypoints, cell_kpid, nothing)
+                cell_kp ≡ nothing || push!(keypoints, cell_kp)
+            end
+        end
+    finally
+        unlock(f.grid_lock)
+        unlock(f.keypoints_lock)
+    end
+
+    keypoints
 end
 
 function reset!(f::Frame)

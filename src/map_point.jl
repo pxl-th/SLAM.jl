@@ -161,3 +161,14 @@ function is_bad!(m::MapPoint)::Bool
         false
     end
 end
+
+function mappoint_min_distance(m1::MapPoint, m2::MapPoint)
+    min_distance = 1e6
+    lock(m1.mappoint_lock) do
+        for d1 in values(m1.keyframes_descriptors), d2 in values(m2.keyframes_descriptors)
+            distance = hamming_distance(d1, d2)
+            distance < min_distance && (min_distance = distance;)
+        end
+    end
+    min_distance
+end

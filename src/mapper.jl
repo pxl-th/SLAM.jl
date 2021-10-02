@@ -70,8 +70,15 @@ function run!(mapper::Mapper)
         end
         # Update the map points and the covisibility graph between KeyFrames.
         update_frame_covisibility!(mapper.map_manager, new_keyframe)
+        if kf.id > 0
+            try
+                match_local_map!(mapper, new_keyframe)
+            catch e
+                showerror(stdout, e)
+                display(stacktrace(catch_backtrace()))
+            end
+        end
 
-        # TODO match to local map
         # Send new KF to estimator for bundle adjustment.
         @debug "[MP] Sending new Keyframe to Estimator."
         add_new_kf!(mapper.estimator, new_keyframe)
@@ -178,6 +185,178 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         good += 1
     end
     @info "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
+end
+
+function match_local_map!(mapper::Mapper, frame::Frame)
+    # Maximum number of MapPoints to track.
+    max_nb_mappoints = 10 * mapper.params.max_nb_keypoints
+    covisibility_map = get_covisible_map(frame)
+    @debug "[MP] Local Map Matching Frame $(frame.id), $(frame.kfid)."
+    @debug "[MP] Covisibility size: $(length(covisibility_map))."
+
+    if length(frame.local_map_ids) < max_nb_mappoints
+        # Get local map of the oldest covisible KeyFrame and add it
+        # to the local map to `frame` to search for MapPoints.
+        kfid = collect(keys(covisibility_map))[1]
+        co_kf = get_keyframe(mapper.map_manager, kfid)
+        while co_kf ≡ nothing && kfid > 0
+            kfid -= 1
+            co_kf = get_keyframe(mapper.map_manager, kfid)
+        end
+
+        co_kf ≢ nothing && union!(frame.local_map_ids, co_kf.local_map_ids)
+        # TODO if still not enough, go for another round.
+    end
+    @debug "[MP] Local Map candidates $(length(frame.local_map_ids))."
+
+    prev_new_map = do_local_map_matching(
+        mapper, frame, frame.local_map_ids;
+        max_projection_distance=mapper.params.max_projection_distance,
+        max_descriptor_distance=mapper.params.max_descriptor_distance)
+    @debug "[MP] New Matching: $(length(prev_new_map))."
+
+    # TODO merge matches
+end
+
+function do_local_map_matching(
+    mapper::Mapper, frame::Frame, local_map::Set{Int64};
+    max_projection_distance, max_descriptor_distance,
+)
+    prev_new_map = Dict{Int64, Int64}()
+    isempty(local_map) && return prev_new_map
+
+    # Maximum field of view.
+    vfov = 0.5 * frame.camera.height / frame.camera.fy
+    hfov = 0.5 * frame.camera.width / frame.camera.fx
+    max_rad_fov = vfov > hfov ? atan(vfov) : atan(hfov)
+    view_threshold = cos(max_rad_fov)
+
+    # Define max distance from projection.
+    frame.nb_3d_kpts < 30 && (max_projection_distance *= 2.0;)
+    # matched kpid → [(local map kpid, distance)] TODO
+    matches = Dict{Int64, Vector{Tuple{Int64, Float64}}}()
+
+    # Go through all MapPoints from the local map in `frame`.
+    for kpid in local_map
+        is_observing_kp(frame, kpid) && continue
+        mp = get_mappoint(mapper.map_manager, kpid)
+        mp ≡ nothing && continue
+        (!mp.is_3d || isempty(mp.descriptor)) && continue
+
+        # Project MapPoint into KeyFrame's image plane.
+        position = get_position(mp)
+        camera_position = project_world_to_camera(frame, position)[1:3]
+        camera_position[3] < 0.1 && continue
+
+        view_angle = camera_position[3] / norm(camera_position)
+        abs(view_angle) < view_threshold && continue
+
+        projection = project_undistort(frame.camera, camera_position)
+        in_image(frame.camera, projection) || continue
+
+        surrounding_keypoints = get_surrounding_keypoints(frame, projection)
+
+        # Find best match for the `mp` among `surrounding_keypoints`.
+        best_id, best_distance = find_best_match(
+            mapper.map_manager, frame, mp, projection, surrounding_keypoints;
+            max_projection_distance, max_descriptor_distance)
+        best_id == -1 && continue
+
+        match = (kpid, best_distance)
+        if best_id in keys(matches)
+            push!(matches[best_id], match)
+        else
+            matches[best_id] = Tuple{Int64, Float64}[match]
+        end
+    end
+
+    for (kpid, match) in matches
+        best_distance = 1e6
+        best_id = -1
+
+        for (local_kpid, distance) in match
+            if distance ≤ best_distance
+                best_distance = distance
+                best_id = local_kpid
+            end
+            best_id != -1 && (prev_new_map[kpid] = best_id;)
+        end
+    end
+    prev_new_map
+end
+
+"""
+For a given `target_mp` MapPoint, find best match among surrounding keypoints.
+"""
+function find_best_match(
+    map_manager::MapManager, frame::Frame, target_mp::MapPoint,
+    projection, surrounding_keypoints;
+    max_projection_distance, max_descriptor_distance,
+)
+    target_mp_observers = get_observers(target_mp)
+    target_mp_position = get_position(target_mp)
+
+    min_distance = 256.0 * max_descriptor_distance
+    best_distance, second_distance = min_distance, min_distance
+    best_id, second_id = -1, -1
+
+    for kp in surrounding_keypoints
+        kp.id < 0 && continue
+        distance = norm(projection .- kp.pixel)
+        distance > max_projection_distance && continue
+
+        mp = get_mappoint(map_manager, kp.id)
+        if mp ≡ nothing
+            remove_mappoint_obs!(map_manager, kp.id, frame.kfid)
+            continue
+        end
+        isempty(mp.descriptor) && continue
+
+        # Check that `kp` and `target_mp` are indeed candidates for matching.
+        # They should have no overlap in their observers.
+        mp_observers = get_observers(mp)
+        isempty(intersect(target_mp_observers, mp_observers)) || continue
+
+        avg_projection = 0.0
+        n_projections = 0
+
+        # Compute average projection distance for the `target_mp` projected
+        # into each of the `mp` observers KeyFrame.
+        for observer_kfid in mp_observers
+            observer_kf = get_keyframe(map_manager, observer_kfid)
+            observer_kf ≡ nothing && (remove_mappoint_obs!(
+                map_manager, kp.id, observer_kfid); continue)
+
+            observer_kp = get_keypoint(observer_kf, kp.id)
+            observer_kp ≡ nothing && (remove_mappoint_obs!(
+                map_manager, kp.id, observer_kfid); continue)
+
+            observer_projection = project_world_to_image_distort(
+                observer_kf, target_mp_position)
+            avg_projection += norm(observer_kp.pixel .- observer_projection)
+            n_projections += 1
+        end
+        avg_projection /= n_projections
+
+        avg_projection > max_projection_distance && continue
+
+        distance = mappoint_min_distance(target_mp, mp)
+        if distance ≤ best_distance
+            second_distance = best_distance
+            second_id = best_id
+
+            best_distance = distance
+            best_id = kp.id
+        elseif distance ≤ second_distance
+            second_distance = distance
+            second_id = kp.id
+        end
+    end
+
+    best_id != -1 && second_id != -1 &&
+        0.9 * second_distance < best_distance && (best_id = -1;)
+
+    best_id, best_distance
 end
 
 function get_new_kf!(mapper::Mapper)
