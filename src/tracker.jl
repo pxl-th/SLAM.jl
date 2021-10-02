@@ -26,8 +26,7 @@ function fb_tracking!(
     # Forward tracking.
     flow = fill(Point2f(0.0, 0.0), length(keypoints))
     flow, status = ImageTracking.optflow!(
-        previous_pyramid, current_pyramid, keypoints, flow, algorithm,
-    )
+        previous_pyramid, current_pyramid, keypoints, flow, algorithm)
 
     valid_correspondences = Vector{Point2f}(undef, sum(status))
     valid_ids = Dict{Int, Int}() # Mapping to the original points ids.
@@ -48,8 +47,7 @@ function fb_tracking!(
     back_flow = fill(Point2f(0.0, 0.0), length(valid_correspondences))
     back_flow, back_status = ImageTracking.optflow!(
         current_pyramid, previous_pyramid, valid_correspondences,
-        back_flow, algorithm,
-    )
+        back_flow, algorithm)
     for i in 1:length(back_status)
         idx = valid_ids[i]
         back_status[i] || (status[idx] = false; continue)
@@ -73,6 +71,5 @@ function fb_tracking!(
     algorithm = LucasKanade(nb_iterations; window_size, pyramid_levels)
     fb_tracking!(
         new_keypoints, previous_pyramid, current_pyramid,
-        keypoints, algorithm; max_distance,
-    )
+        keypoints, algorithm; max_distance)
 end

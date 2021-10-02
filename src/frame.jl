@@ -22,11 +22,6 @@ function Keypoint(::Val{:invalid})
     )
 end
 
-# function Keypoint(id, kp::ImageFeatures.Keypoint)
-#     kp = Point2f(kp[1], kp[2])
-#     Keypoint(id, kp, kp, false)
-# end
-
 @inline is_valid(k::Keypoint)::Bool = k.id != -1
 
 mutable struct Frame
@@ -130,6 +125,12 @@ function get_3d_keypoints(f::Frame)
         end
         @assert (i - 1) == f.nb_3d_kpts
         kps
+    end
+end
+
+function get_3d_keypoints_nb(f::Frame)
+    lock(f.keypoints_lock) do
+        return f.nb_3d_kpts
     end
 end
 
@@ -299,6 +300,13 @@ function get_cw_ba(f::Frame)::NTuple{6, Float64}
     lock(f.pose_lock) do
         r = RotZYX(f.cw[1:3, 1:3])
         (r.theta1, r.theta2, r.theta3, f.cw[1:3, 4]...)
+    end
+end
+
+function get_wc_ba(f::Frame)::NTuple{6, Float64}
+    lock(f.pose_lock) do
+        r = RotXYZ(f.wc[1:3, 1:3])
+        (r.theta1, r.theta2, r.theta3, f.wc[1:3, 4]...)
     end
 end
 

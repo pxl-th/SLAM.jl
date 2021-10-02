@@ -32,8 +32,7 @@ function MapManager(params::Params, frame::Frame, extractor::Extractor)
     MapManager(
         frame, Dict{Int64, Frame}(), params, extractor,
         Dict{Int64, MapPoint}(), 0, 0, 0, 0,
-        mappoint_lock, keyframe_lock, map_lock,
-    )
+        mappoint_lock, keyframe_lock, map_lock)
 end
 
 function get_keyframe(m::MapManager, kfid)
@@ -91,6 +90,10 @@ function extract_keypoints!(m::MapManager, image)
     isempty(keypoints) && return
 
     add_keypoints_to_frame!(m, m.current_frame, keypoints)
+
+    vimage = RGB{Float64}.(image)
+    draw_keypoints!(vimage, m.current_frame)
+    save("/home/pxl-th/projects/slam-data/images/frame-$(m.current_frame.id).png", vimage)
 end
 
 function add_keypoints_to_frame!(m::MapManager, frame, keypoints)

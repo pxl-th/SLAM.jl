@@ -52,8 +52,7 @@ function update!(m::MotionModel, wc::SMatrix{4, 4, Float64}, time)
     m.prev_time = time
     δt < 0 && error(
         "Got older than previous image! " *
-        "Previous time $(m.prev_time) vs time $time."
-    )
+        "Previous time $(m.prev_time) vs time $time.")
 
     new_rel = inv(SE3, m.prev_wc) * wc
     m.log_rel_t = log_lie(SE3, new_rel) ./ δt

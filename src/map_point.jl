@@ -26,21 +26,18 @@ end
 
 function MapPoint(::Val{:invalid})
     MapPoint(
-        -1, -1, Set{Int64}(), BitVector(),
-        Dict{Int64, BitVector}(), Dict{Int64, Float64}(),
-        Point3f(0, 0, 0), 0, false, false, ReentrantLock(),
-    )
+        -1, -1, OrderedSet{Int64}(), Point3f(0, 0, 0),
+        0, false, false, ReentrantLock())
 end
 
 function MapPoint(id, kfid, is_observed::Bool = true)
-    observed_keyframes_ids = Set{Int64}(kfid)
+    observed_keyframes_ids = OrderedSet{Int64}(kfid)
     position = Point3f(0, 0, 0)
     is_3d = false
 
     MapPoint(
         id, kfid, observed_keyframes_ids,
-        position, is_3d, is_observed, ReentrantLock(),
-    )
+        position, is_3d, is_observed, ReentrantLock())
 end
 
 @inline is_valid(m::MapPoint)::Bool = m.id != -1

@@ -11,34 +11,7 @@ using GLMakie
 
 using LeastSquaresOptim
 using SparseArrays
-using SparsityDetection
 using SparseDiffTools
-
-function sparsity_main()
-    function f!(y, x)
-        for i in 2:length(x)-1
-            y[i] = x[i - 1] - 2 * x[i] + x[i + 1]
-        end
-        y[1] = x[1] - 10
-        y[end] = x[end - 1] - 2 * x[end]
-    nothing
-    end
-
-    x = rand(1000)
-    y = similar(x)
-
-    # Detect sparsity and color the Jacobian
-    sparsity_pattern = jacobian_sparsity(f!, y, x)
-    sparse_jacobian = Float64.(sparsity_pattern)
-    colors = matrix_colors(sparse_jacobian)
-
-    g! = (jac, x) -> forwarddiff_color_jacobian!(jac, f!, x, colorvec=colors)
-    result = optimize!(
-        LeastSquaresProblem(deepcopy(x), y, f!, sparse_jacobian, g!),
-        LevenbergMarquardt(LeastSquaresOptim.LSMR()),
-    )
-end
-sparsity_main()
 
 image = rand(RGB{Float64}, 128, 128)
 save("./tmp.png", image)
@@ -73,7 +46,6 @@ function makie_main()
     top_grid[1, 2, Top()] = Label(figure, "Tracked Keypoints")
 
     # Bottom grid configuration.
-
     camera_dir_element = MarkerElement(;color=:red, marker="→")
     keypoint_element = MarkerElement(;color=:green, marker="⬤")
     mappoint_element = MarkerElement(;color=:blue, marker="⬤")
