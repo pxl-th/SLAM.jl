@@ -444,8 +444,6 @@ function klt_tracking!(fe::FrontEnd)
         i3d += 1
     end
 
-    @info "[FE] 3D Points WILL TRACKE: $i3d"
-
     i3d -= 1
     displacements_3d = @view(displacements_3d[1:i3d])
     prior_3d_pixels = @view(prior_3d_pixels[1:i3d])

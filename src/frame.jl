@@ -13,17 +13,10 @@ mutable struct Keypoint
     """
     position::Point3f
     descriptor::BitVector
+
     is_3d::Bool
+    is_retracked::Bool
 end
-
-function Keypoint(::Val{:invalid})
-    Keypoint(
-        -1, Point2f(0, 0), Point2f(0, 0), Point3f(0, 0, 0),
-        BitVector(), false,
-    )
-end
-
-@inline is_valid(k::Keypoint)::Bool = k.id != -1
 
 mutable struct Frame
     """
@@ -167,7 +160,7 @@ function add_keypoint!(
     undistorted_point = undistort_point(f.camera, point)
     position = backproject(f.camera, undistorted_point)
     add_keypoint!(f, Keypoint(
-        id, point, undistorted_point, position, descriptor, is_3d))
+        id, point, undistorted_point, position, descriptor, is_3d, false))
 end
 
 function add_keypoint!(f::Frame, keypoint::Keypoint)
@@ -202,6 +195,25 @@ function update_keypoint!(f::Frame, kpid, point)
         update_keypoint_in_grid!(f, ckp, kp)
         f.keypoints[kpid] = kp
     end
+end
+
+function update_keypoint!(f::Frame, prev_id, new_id, is_3d::Bool)
+    has_new = false
+    lock(f.keypoints_lock)
+    has_new = new_id in keys(f.keypoints)
+    unlock(f.keypoints_lock)
+    has_new && return false
+
+    prev_kp = get_keypoint(f, prev_id)
+    prev_kp ≡ nothing && return false
+
+    prev_kp.id = new_id
+    prev_kp.is_retracked = true
+    prev_kp.is_3d = is_3d
+
+    remove_keypoint!(f, prev_id)
+    add_keypoint!(f, prev_kp)
+    true
 end
 
 function update_keypoint_in_grid!(
@@ -366,8 +378,17 @@ function set_covisible_map!(f::Frame, covisible_map)
 end
 
 function add_covisibility!(f::Frame, kfid, cov_score)
+    kfid == f.kfid && return
     lock(f.covisibility_lock) do
         f.covisible_kf[kfid] = cov_score
+    end
+end
+
+function add_covisibility!(f::Frame, kfid)
+    kfid == f.kfid && return
+    lock(f.covisibility_lock) do
+        score = get(f.covisible_kf, kfid, 0)
+        f.covisible_kf[kfid] = score + 1
     end
 end
 

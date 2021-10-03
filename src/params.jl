@@ -70,7 +70,7 @@ Base.@kwdef mutable struct Params
     Used during matching to local map.
     """
     max_projection_distance::Float64 = 2.0
-    max_descriptor_distance::Float64 = 0.2
+    max_descriptor_distance::Float64 = 0.35
 end
 
 function reset!(p::Params)

@@ -82,7 +82,6 @@ function run!(mapper::Mapper)
         # Send new KF to estimator for bundle adjustment.
         @debug "[MP] Sending new Keyframe to Estimator."
         add_new_kf!(mapper.estimator, new_keyframe)
-        # TODO send new KF to loop closer
     end
     mapper.estimator.exit_required = true
     @info "[MP] Exit required."
@@ -187,12 +186,14 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
     @info "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
 end
 
+"""
+Try matching keypoints from `frame` with keypoints from frames in its
+covisibility graph (aka local map).
+"""
 function match_local_map!(mapper::Mapper, frame::Frame)
     # Maximum number of MapPoints to track.
     max_nb_mappoints = 10 * mapper.params.max_nb_keypoints
     covisibility_map = get_covisible_map(frame)
-    @debug "[MP] Local Map Matching Frame $(frame.id), $(frame.kfid)."
-    @debug "[MP] Covisibility size: $(length(covisibility_map))."
 
     if length(frame.local_map_ids) < max_nb_mappoints
         # Get local map of the oldest covisible KeyFrame and add it
@@ -214,10 +215,33 @@ function match_local_map!(mapper::Mapper, frame::Frame)
         max_projection_distance=mapper.params.max_projection_distance,
         max_descriptor_distance=mapper.params.max_descriptor_distance)
     @debug "[MP] New Matching: $(length(prev_new_map))."
+    # display(prev_new_map); println()
 
-    # TODO merge matches
+    isempty(prev_new_map) || merge_matches(mapper, prev_new_map)
 end
 
+function merge_matches(mapper::Mapper, prev_new_map::Dict{Int64, Int64})
+    lock(mapper.map_manager.optimization_lock)
+    lock(mapper.map_manager.map_lock)
+    try
+        for (prev_id, new_id) in prev_new_map
+            merge_mappoints(mapper.map_manager, prev_id, new_id);
+        end
+    catch e
+        showerror(stdout, e); println()
+        display(stacktrace(catch_backtrace())); println()
+    finally
+        unlock(mapper.map_manager.map_lock)
+        unlock(mapper.map_manager.optimization_lock)
+    end
+end
+
+"""
+Given a frame and its local map of Keypoints ids (triangulated),
+project respective mappoints onto the frame, find surrounding keypoints (triangulated?),
+match surrounding keypoints with the projection.
+Best match is the new candidate for replacement.
+"""
 function do_local_map_matching(
     mapper::Mapper, frame::Frame, local_map::Set{Int64};
     max_projection_distance, max_descriptor_distance,
@@ -230,6 +254,7 @@ function do_local_map_matching(
     hfov = 0.5 * frame.camera.width / frame.camera.fx
     max_rad_fov = vfov > hfov ? atan(vfov) : atan(hfov)
     view_threshold = cos(max_rad_fov)
+    @debug "[MP] View threshold $view_threshold."
 
     # Define max distance from projection.
     frame.nb_3d_kpts < 30 && (max_projection_distance *= 2.0;)
@@ -287,6 +312,10 @@ end
 
 """
 For a given `target_mp` MapPoint, find best match among surrounding keypoints.
+
+Given target mappoint from covisibility graph, its projection onto `frame`
+and surrounding keypoints in `frame` for that projection,
+find best matching keypoint (already triangulated?) in `frame`.
 """
 function find_best_match(
     map_manager::MapManager, frame::Frame, target_mp::MapPoint,
@@ -296,6 +325,7 @@ function find_best_match(
     target_mp_observers = get_observers(target_mp)
     target_mp_position = get_position(target_mp)
 
+    # TODO parametrize descriptor size.
     min_distance = 256.0 * max_descriptor_distance
     best_distance, second_distance = min_distance, min_distance
     best_id, second_id = -1, -1
@@ -305,8 +335,10 @@ function find_best_match(
         distance = norm(projection .- kp.pixel)
         distance > max_projection_distance && continue
 
+        # TODO should surrounding kp be triangulated?
         mp = get_mappoint(map_manager, kp.id)
         if mp ≡ nothing
+            # TODO should remove keypoint as well?
             remove_mappoint_obs!(map_manager, kp.id, frame.kfid)
             continue
         end
@@ -337,7 +369,6 @@ function find_best_match(
             n_projections += 1
         end
         avg_projection /= n_projections
-
         avg_projection > max_projection_distance && continue
 
         distance = mappoint_min_distance(target_mp, mp)
@@ -353,8 +384,8 @@ function find_best_match(
         end
     end
 
-    best_id != -1 && second_id != -1 &&
-        0.9 * second_distance < best_distance && (best_id = -1;)
+    # best_id != -1 && second_id != -1 &&
+    #     0.9 * second_distance < best_distance && (best_id = -1;)
 
     best_id, best_distance
 end

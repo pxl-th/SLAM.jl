@@ -22,17 +22,19 @@ mutable struct MapManager
     mappoint_lock::ReentrantLock
     keyframe_lock::ReentrantLock
     map_lock::ReentrantLock
+    optimization_lock::ReentrantLock
 end
 
 function MapManager(params::Params, frame::Frame, extractor::Extractor)
     mappoint_lock = ReentrantLock()
     keyframe_lock = ReentrantLock()
     map_lock = ReentrantLock()
+    optimization_lock = ReentrantLock()
 
     MapManager(
         frame, Dict{Int64, Frame}(), params, extractor,
         Dict{Int64, MapPoint}(), 0, 0, 0, 0,
-        mappoint_lock, keyframe_lock, map_lock)
+        mappoint_lock, keyframe_lock, map_lock, optimization_lock)
 end
 
 function get_keyframe(m::MapManager, kfid)
@@ -208,6 +210,10 @@ function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
     lock(m.keyframe_lock)
     lock(m.mappoint_lock)
 
+    # Remove MapPoint from KeyFrame.
+    kf = get(m.frames_map, kfid, nothing)
+    kf ≢ nothing && remove_keypoint!(kf, kpid)
+
     mp = get(m.map_points, kpid, nothing)
     if mp ≡ nothing
         unlock(m.mappoint_lock)
@@ -217,15 +223,6 @@ function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
 
     # Remove KeyFrame observation from MapPoint.
     remove_kf_observation!(mp, kfid)
-
-    # Remove MapPoint from KeyFrame.
-    kf = get(m.frames_map, kfid, nothing)
-    if kf ≡ nothing
-        unlock(m.mappoint_lock)
-        unlock(m.keyframe_lock)
-        return
-    end
-    remove_keypoint!(kf, kpid)
 
     for observer_id in mp.observer_keyframes_ids
         observer_kf = get(m.frames_map, observer_id, nothing)
@@ -341,4 +338,55 @@ function reset!(m::MapManager)
 
     m.map_points |> empty!
     m.frames_map |> empty!
+end
+
+function merge_mappoints(m::MapManager, prev_id, new_id)
+    lock(m.mappoint_lock)
+    lock(m.keyframe_lock)
+    try
+        prev_mp = get(m.map_points, prev_id, nothing)
+        prev_mp ≡ nothing && return
+        new_mp = get(m.map_points, new_id, nothing)
+        new_mp ≡ nothing && return
+        new_mp.is_3d || return
+
+        prev_observers = get_observers(prev_mp)
+        new_observers = get_observers(new_mp)
+
+        # For previous mappoint observers, update keypoint for them.
+        # If successfull, then add covisibility link between old and new
+        # observer keyframes.
+        for prev_observer_id in prev_observers
+            prev_observer_kf = get(m.frames_map, prev_observer_id, nothing)
+            prev_observer_kf ≡ nothing && continue
+            update_keypoint!(
+                prev_observer_kf, prev_id, new_id, new_mp.is_3d) || continue
+
+            add_keyframe_observation!(new_mp, prev_observer_id)
+            for new_observer_id in new_observers
+                new_observer_kf = get(m.frames_map, new_observer_id, nothing)
+                new_observer_kf ≡ nothing && continue
+
+                add_covisibility!(new_observer_kf, prev_observer_id)
+                add_covisibility!(prev_observer_kf, new_observer_id)
+            end
+        end
+
+        for (kfid, descriptor) in prev_mp.keyframes_descriptors
+            add_descriptor!(new_mp, kfid, descriptor)
+        end
+        if is_observing_kp(m.current_frame, prev_id)
+            update_keypoint!(m.current_frame, prev_id, new_id, new_mp.is_3d)
+        end
+
+        # Update nb mappoints and erase old mappoint.
+        prev_mp.is_3d && (m.nb_mappoints -= 1;)
+        pop!(m.map_points, prev_id)
+    catch e
+        showerror(stdout, e); println()
+        display(stacktrace(catch_backtrace())); println()
+    finally
+        unlock(m.keyframe_lock)
+        unlock(m.mappoint_lock)
+    end
 end
