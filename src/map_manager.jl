@@ -224,12 +224,14 @@ function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
     # Remove KeyFrame observation from MapPoint.
     remove_kf_observation!(mp, kfid)
 
-    for observer_id in mp.observer_keyframes_ids
-        observer_kf = get(m.frames_map, observer_id, nothing)
-        observer_kf ≡ nothing && continue
+    if kf ≢ nothing
+        for observer_id in mp.observer_keyframes_ids
+            observer_kf = get(m.frames_map, observer_id, nothing)
+            observer_kf ≡ nothing && continue
 
-        decrease_covisible_kf!(kf, observer_id)
-        decrease_covisible_kf!(observer_kf, kfid)
+            decrease_covisible_kf!(kf, observer_id)
+            decrease_covisible_kf!(observer_kf, kfid)
+        end
     end
 
     unlock(m.keyframe_lock)

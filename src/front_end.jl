@@ -451,9 +451,13 @@ function klt_tracking!(fe::FrontEnd)
 
     # First, track 3d keypoints, if using prior.
     if fe.params.use_prior && !isempty(displacements_3d)
+        # TODO adjust displacement for the number of pyramid levels
+        # If 1 - divide displacement by 2, etc.
         new_keypoints, status = fb_tracking!(
             fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
-            pyramid_levels=1, window_size=fe.params.window_size,
+            pyramid_levels=0,
+            # pyramid_levels=fe.params.pyramid_levels,
+            window_size=fe.params.window_size,
             max_distance=fe.params.max_ktl_distance)
 
         nb_good = 0
@@ -484,7 +488,7 @@ function klt_tracking!(fe::FrontEnd)
     isempty(prior_pixels) && return
     new_keypoints, status = fb_tracking!(
         fe.previous_pyramid, fe.current_pyramid, prior_pixels;
-        pyramid_levels=1, #fe.params.pyramid_levels,
+        pyramid_levels=fe.params.pyramid_levels,
         window_size=fe.params.window_size,
         max_distance=fe.params.max_ktl_distance)
 

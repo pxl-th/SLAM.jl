@@ -49,9 +49,11 @@ function fb_tracking!(
     end
 
     # Backward tracking.
+    # TODO adjust displacement for the number of pyramid levels
+    # If 1 - divide displacement by 2, etc.
     back_algorithm = LucasKanade(
         algorithm.iterations; window_size=algorithm.window_size,
-        pyramid_levels=1)
+        pyramid_levels=0)
     back_displacement, back_status = ImageTracking.optflow!(
         current_pyramid, previous_pyramid, valid_correspondences,
         back_displacement, back_algorithm)
