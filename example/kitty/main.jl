@@ -7,7 +7,7 @@ include("kitty.jl")
 
 function main(n_frames::Int)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "04"
+    sequence = "00"
     dataset = KittyDataset(base_dir, sequence)
     println(dataset)
 
@@ -22,8 +22,8 @@ function main(n_frames::Int)
 
     fx, fy = dataset.K[1, 1], dataset.K[2, 2]
     cx, cy = dataset.K[1:2, 3]
-    # height, width = 376, 1241
-    height, width = 370, 1226
+    height, width = 376, 1241
+    # height, width = 370, 1226
     camera = SLAM.Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
     params = Params(;
         window_size=9, max_distance=35, pyramid_levels=3,

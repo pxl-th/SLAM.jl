@@ -197,6 +197,7 @@ function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
     for kp in values(frame.keypoints)
         in_image(frame.camera, kp.pixel) || continue
         color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
+        kp.is_retracked && (color = T(1, 0, 0);)
         draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
     end
     image

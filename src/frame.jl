@@ -12,17 +12,11 @@ mutable struct Keypoint
     Position of a keypoint in 3D space in `(x, y, z = 1)` format.
     """
     position::Point3f
+    descriptor::BitVector
+
     is_3d::Bool
+    is_retracked::Bool
 end
-
-function Keypoint(::Val{:invalid})
-    Keypoint(
-        -1, Point2f(0, 0), Point2f(0, 0), Point3f(0, 0, 0),
-        BitVector(), false,
-    )
-end
-
-@inline is_valid(k::Keypoint)::Bool = k.id != -1
 
 mutable struct Frame
     """
@@ -59,7 +53,7 @@ mutable struct Frame
     Map of covisible KeyFrames.
     KFid → Number of MapPoints that this Frame shared with `KFid` frame.
     """
-    covisible_kf::Dict{Int64, Int64}
+    covisible_kf::OrderedDict{Int64, Int64}
     local_map_ids::Set{Int64}
 
     keypoints_lock::ReentrantLock
@@ -93,7 +87,7 @@ function Frame(;
         keypoints, grid,
         nb_occupied_cells, cell_size,
         nb_keypoints, 0, 0,
-        Dict{Int64, Int64}(), Set{Int64}(),
+        OrderedDict{Int64, Int64}(), Set{Int64}(),
         keypoints_lock, pose_lock, grid_lock, covisibility_lock,
     )
 end
@@ -159,10 +153,14 @@ function get_keypoint_unpx(f::Frame, kpid)
     end
 end
 
-function add_keypoint!(f::Frame, point, id; is_3d::Bool = false)
+function add_keypoint!(
+    f::Frame, point, id; descriptor::BitVector = BitVector(),
+    is_3d::Bool = false,
+)
     undistorted_point = undistort_point(f.camera, point)
     position = backproject(f.camera, undistorted_point)
-    add_keypoint!(f, Keypoint(id, point, undistorted_point, position, is_3d))
+    add_keypoint!(f, Keypoint(
+        id, point, undistorted_point, position, descriptor, is_3d, false))
 end
 
 function add_keypoint!(f::Frame, keypoint::Keypoint)
@@ -197,6 +195,25 @@ function update_keypoint!(f::Frame, kpid, point)
         update_keypoint_in_grid!(f, ckp, kp)
         f.keypoints[kpid] = kp
     end
+end
+
+function update_keypoint!(f::Frame, prev_id, new_id, is_3d::Bool)
+    has_new = false
+    lock(f.keypoints_lock)
+    has_new = new_id in keys(f.keypoints)
+    unlock(f.keypoints_lock)
+    has_new && return false
+
+    prev_kp = get_keypoint(f, prev_id)
+    prev_kp ≡ nothing && return false
+
+    prev_kp.id = new_id
+    prev_kp.is_retracked = true
+    prev_kp.is_3d = is_3d
+
+    remove_keypoint!(f, prev_id)
+    add_keypoint!(f, prev_kp)
+    true
 end
 
 function update_keypoint_in_grid!(
@@ -361,8 +378,17 @@ function set_covisible_map!(f::Frame, covisible_map)
 end
 
 function add_covisibility!(f::Frame, kfid, cov_score)
+    kfid == f.kfid && return
     lock(f.covisibility_lock) do
         f.covisible_kf[kfid] = cov_score
+    end
+end
+
+function add_covisibility!(f::Frame, kfid)
+    kfid == f.kfid && return
+    lock(f.covisibility_lock) do
+        score = get(f.covisible_kf, kfid, 0)
+        f.covisible_kf[kfid] = score + 1
     end
 end
 
@@ -383,6 +409,63 @@ function remove_covisible_kf!(f::Frame, kfid)
     lock(f.covisibility_lock) do
         kfid in keys(f.covisible_kf) && pop!(f.covisible_kf, kfid)
     end
+end
+
+function is_observing_kp(f::Frame, kpid)
+    lock(f.keypoints_lock) do
+        kpid in keys(f.keypoints)
+    end
+end
+
+function get_surrounding_keypoints(f::Frame, kp::Keypoint)
+    keypoints = Vector{Keypoint}(undef, 0)
+    sizehint!(keypoints, 20)
+    kpi = to_cartesian(kp.pixel, f.cell_size)
+
+    lock(f.keypoints_lock)
+    lock(f.grid_lock)
+    try
+        for r in (kpi[1] - 1):(kpi[1] + 1), c in (kpi[2] - 1):(kpi[2] + 1)
+            (r < 1 || c < 1 || r > size(f.keypoints_grid, 1)
+                || c > size(f.keypoints_grid, 2)) && continue
+
+            for cell_kpid in f.keypoints_grid[r, c]
+                cell_kpid == kp.id && continue
+                cell_kp = get(f, cell_kpid, nothing)
+                cell_kp ≡ nothing || push!(keypoints, cell_kp)
+            end
+        end
+    finally
+        unlock(f.grid_lock)
+        unlock(f.keypoints_lock)
+    end
+
+    keypoints
+end
+
+function get_surrounding_keypoints(f::Frame, pixel::Point2f)
+    keypoints = Vector{Keypoint}(undef, 0)
+    sizehint!(keypoints, 20)
+    kpi = to_cartesian(pixel, f.cell_size)
+
+    lock(f.keypoints_lock)
+    lock(f.grid_lock)
+    try
+        for r in (kpi[1] - 1):(kpi[1] + 1), c in (kpi[2] - 1):(kpi[2] + 1)
+            (r < 1 || c < 1 || r > size(f.keypoints_grid, 1)
+                || c > size(f.keypoints_grid, 2)) && continue
+
+            for cell_kpid in f.keypoints_grid[r, c]
+                cell_kp = get(f.keypoints, cell_kpid, nothing)
+                cell_kp ≡ nothing || push!(keypoints, cell_kp)
+            end
+        end
+    finally
+        unlock(f.grid_lock)
+        unlock(f.keypoints_lock)
+    end
+
+    keypoints
 end
 
 function reset!(f::Frame)

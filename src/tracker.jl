@@ -34,6 +34,7 @@ function fb_tracking!(
     valid_correspondences = Vector{Point2f}(undef, n_good)
     back_displacement = Vector{Point2f}(undef, n_good)
 
+    scale = 1.0 / 2.0^algorithm.pyramid_levels
     c = 1
     @inbounds for i in 1:length(status)
         status[i] || continue
@@ -43,18 +44,15 @@ function fb_tracking!(
         new_keypoints[i] = new_point
 
         valid_correspondences[c] = new_point
-        back_displacement[c] = -Δ
+        back_displacement[c] = -Δ .* scale
         valid_ids[c] = i
         c += 1
     end
 
     # Backward tracking.
-    back_algorithm = LucasKanade(
-        algorithm.iterations; window_size=algorithm.window_size,
-        pyramid_levels=1)
     back_displacement, back_status = ImageTracking.optflow!(
         current_pyramid, previous_pyramid, valid_correspondences,
-        back_displacement, back_algorithm)
+        back_displacement, algorithm)
 
     @inbounds for i in 1:length(back_status)
         idx = valid_ids[i]

@@ -55,12 +55,15 @@ function run!(estimator::Estimator)
             continue
         end
 
+        lock(estimator.map_manager.optimization_lock)
         try
             local_bundle_adjustment!(estimator, new_kf)
             map_filtering!(estimator, new_kf)
         catch e
             showerror(stdout, e); println()
             display(stacktrace(catch_backtrace())); println()
+        finally
+            unlock(estimator.map_manager.optimization_lock)
         end
     end
     @info "[ES] Exit required."
@@ -100,7 +103,7 @@ end
 
 function _get_ba_parameters(
     map_manager::MapManager, frame::Frame,
-    covisibility_map::Dict{Int64, Int64}, min_cov_score,
+    covisibility_map::OrderedDict{Int64, Int64}, min_cov_score,
 )
     # poses: kfid → (order id, θ).
     poses = Dict{Int64, Tuple{Int64, NTuple{6, Float64}}}()

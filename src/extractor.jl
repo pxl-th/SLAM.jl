@@ -19,7 +19,7 @@ struct Extractor
     cell_size::Int
 end
 Extractor(max_points, radius, grid_resolution, cell_size) =
-    Extractor(max_points, BRIEF(), radius, grid_resolution, cell_size)
+    Extractor(max_points, BRIEF(;size=256), radius, grid_resolution, cell_size)
 
 function _shi_tomasi(image, n_keypoints::Int; min_response::Real = 1e-4)
     corners = fill(false, size(image)...)
