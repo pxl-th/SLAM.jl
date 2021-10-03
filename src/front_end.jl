@@ -420,6 +420,7 @@ function klt_tracking!(fe::FrontEnd)
     prior_3d_pixels = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
 
     i, i3d = 1, 1
+    scale = 1.0 / 2.0^fe.params.pyramid_levels
 
     # Select points to track.
     for kp in values(fe.current_frame.keypoints)
@@ -434,11 +435,10 @@ function klt_tracking!(fe::FrontEnd)
         # If using prior, init pixel positions using motion model.
         # Projection in `(y, x)` format.
         projection = project_world_to_image_distort(
-            fe.current_frame, get_position(fe.map_manager.map_points[kp.id]),
-        )
+            fe.current_frame, get_position(fe.map_manager.map_points[kp.id]))
         in_image(fe.current_frame.camera, projection) || continue
 
-        displacements_3d[i3d] = projection .- kp.pixel
+        displacements_3d[i3d] = scale .* (projection .- kp.pixel)
         prior_3d_pixels[i3d] = kp.pixel
         prior_3d_ids[i3d] = kp.id
         i3d += 1
@@ -451,12 +451,9 @@ function klt_tracking!(fe::FrontEnd)
 
     # First, track 3d keypoints, if using prior.
     if fe.params.use_prior && !isempty(displacements_3d)
-        # TODO adjust displacement for the number of pyramid levels
-        # If 1 - divide displacement by 2, etc.
         new_keypoints, status = fb_tracking!(
             fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
-            pyramid_levels=0,
-            # pyramid_levels=fe.params.pyramid_levels,
+            pyramid_levels=fe.params.pyramid_levels,
             window_size=fe.params.window_size,
             max_distance=fe.params.max_ktl_distance)
 
@@ -475,9 +472,7 @@ function klt_tracking!(fe::FrontEnd)
         end
         @info "[FE] 3D Points tracked $nb_good."
         # If motion model is wrong, require P3P next.
-        if nb_good < 0.33 * length(displacements_3d)
-            fe.p3p_required = true
-        end
+        nb_good < 0.33 * length(displacements_3d) && (fe.p3p_required = true;)
     end
 
     i -= 1

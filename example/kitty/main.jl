@@ -7,7 +7,7 @@ include("kitty.jl")
 
 function main(n_frames::Int)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "02"
+    sequence = "00"
     dataset = KittyDataset(base_dir, sequence)
     println(dataset)
 
