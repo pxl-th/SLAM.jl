@@ -405,6 +405,7 @@ function optical_flow_matching!(
 
     i, i3d = 1, 1
     scale = 1.0 / 2.0^pyramid_levels_3d
+    n_good = 0
 
     keypoints = stereo ? get_keypoints(frame) : values(frame.keypoints)
     for kp in keypoints
@@ -462,9 +463,13 @@ function optical_flow_matching!(
         nb_good = 0
         for j in 1:length(status)
             if status[j]
-                # TODO check stereo && update_stereo_keypoint
-                update_keypoint!(frame, ids3d[j], new_keypoints[j])
-                nb_good += 1
+                if stereo
+                    succ = maybe_stereo_update!(frame, ids3d[j], new_keypoints[j])
+                    succ && (n_good += 1;)
+                else
+                    update_keypoint!(frame, ids3d[j], new_keypoints[j])
+                    nb_good += 1
+                end
             else
                 # If failed → add to track with 2d keypoints w/o prior.
                 pixels[i] = pixels3d[j]
@@ -472,7 +477,7 @@ function optical_flow_matching!(
                 i += 1
             end
         end
-        @info "[FE] 3D Points tracked $nb_good."
+        @info "[MM] 3D Points tracked $nb_good. Stereo $stereo."
         failed_3d = nb_good < 0.33 * length(ids3d)
     end
 
@@ -487,13 +492,25 @@ function optical_flow_matching!(
 
     for j in 1:length(new_keypoints)
         if stereo
-            # TODO check stereo && update_stereo_keypoint!
+            status[j] && maybe_stereo_update!(frame, ids[j], new_keypoints[j]) &&
+                (n_good += 1;)
         else
-            if status[j]
-                update_keypoint!(frame, ids[j], new_keypoints[j])
-            else
+            status[j] ?
+                update_keypoint!(frame, ids[j], new_keypoints[j]) :
                 remove_obs_from_current_frame!(map_manager, ids[j])
-            end
         end
     end
+end
+
+function maybe_stereo_update!(
+    frame::Frame, kpid, new_position::Point2f; epipolar_error::Float64 = 2.0,
+)
+    kp = get_keypoint(frame, kpid)
+    right_pixel = undistort_point(frame.right_camera, new_position)
+    abs(kp.undistorted_pixel[1] - right_pixel[1]) > epipolar_error &&
+        return false
+    # Make y-coordinate the same.
+    corrected = Point2f(kp.pixel[1], new_position[2])
+    update_stereo_keypoint!(frame, kpid, corrected)
+    true
 end

@@ -1,4 +1,5 @@
 Base.@kwdef mutable struct Params
+    stereo::Bool = false
     max_nb_keypoints::Int64 = 1000
     """
     Cell size of the grid in the Frame.

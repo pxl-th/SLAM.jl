@@ -16,6 +16,18 @@ mutable struct Keypoint
 
     is_3d::Bool
     is_retracked::Bool
+    is_stereo::Bool
+
+    right_pixel::Point2f
+    right_undistorted_pixel::Point2f
+    right_position::Point3f
+end
+
+function Keypoint(id, pixel, undistorted_pixel, position, descriptor, is_3d)
+    Keypoint(
+        id, pixel, undistorted_pixel, position, descriptor,
+        is_3d, false, false,
+        pixel, undistorted_pixel, position)
 end
 
 mutable struct Frame
@@ -30,12 +42,14 @@ mutable struct Frame
     kfid::Int64
 
     time::Float64
-    # world -> camera transformation.
+    # world → camera transformation.
     cw::SMatrix{4, 4, Float64, 16}
-    # camera -> world transformation.
+    # camera → world transformation.
     wc::SMatrix{4, 4, Float64, 16}
-    # Calibration camera model.
+
     camera::Camera
+    right_camera::Camera
+
     """
     Map of observed keypoints.
     Keypoint id → Keypoint.
@@ -49,6 +63,8 @@ mutable struct Frame
     nb_keypoints::Int64
     nb_2d_kpts::Int64
     nb_3d_kpts::Int64
+    nb_stereo_kpts::Int64
+
     """
     Map of covisible KeyFrames.
     KFid → Number of MapPoints that this Frame shared with `KFid` frame.
@@ -63,11 +79,17 @@ mutable struct Frame
 end
 
 function Frame(;
-    camera::Camera, cell_size::Int64,
+    camera::Camera, right_camera::Union{Nothing, Camera} = nothing,
+    cell_size::Int64,
     id::Int64 = 0, kfid::Int64 = 0, time::Float64 = 0.0,
     cw::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
     wc::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
 )
+    if right_camera ≡ nothing
+        @warn "[F] No right camera."
+        right_camera = camera
+    end
+
     nb_keypoints = 0
     nb_occupied_cells = 0
     keypoints = Dict{Int64, Keypoint}()
@@ -83,10 +105,10 @@ function Frame(;
 
     Frame(
         id, kfid, time, cw, wc,
-        camera,
+        camera, right_camera,
         keypoints, grid,
         nb_occupied_cells, cell_size,
-        nb_keypoints, 0, 0,
+        nb_keypoints, 0, 0, 0,
         OrderedDict{Int64, Int64}(), Set{Int64}(),
         keypoints_lock, pose_lock, grid_lock, covisibility_lock,
     )
@@ -160,7 +182,7 @@ function add_keypoint!(
     undistorted_point = undistort_point(f.camera, point)
     position = backproject(f.camera, undistorted_point)
     add_keypoint!(f, Keypoint(
-        id, point, undistorted_point, position, descriptor, is_3d, false))
+        id, point, undistorted_point, position, descriptor, is_3d))
 end
 
 function add_keypoint!(f::Frame, keypoint::Keypoint)
@@ -184,16 +206,39 @@ end
 
 function update_keypoint!(f::Frame, kpid, point)
     lock(f.keypoints_lock) do
-        kpid in keys(f.keypoints) || return
+        ckp = get(f.keypoints, kpid, nothing)
+        ckp ≡ nothing && return
 
-        ckp = f.keypoints[kpid]
         kp = ckp |> deepcopy
         kp.pixel = point
         kp.undistorted_pixel = undistort_point(f.camera, kp.pixel)
         kp.position = backproject(f.camera, kp.undistorted_pixel)
 
+        if kp.is_stereo
+            kp.is_stereo = false
+            f.nb_stereo_kpts -= 1
+        end
+
         update_keypoint_in_grid!(f, ckp, kp)
         f.keypoints[kpid] = kp
+    end
+end
+
+function update_stereo_keypoint!(f::Frame, kpid, right_pixel)
+    lock(f.keypoints_lock) do
+        kp = get(f.keypoints, kpid, nothing)
+        kp ≡ nothing && return
+
+        kp.right_pixel = right_pixel
+        kp.right_undistorted_pixel =
+            undistort_point(f.right_camera, right_pixel)
+        kp.right_position =
+            backproject(f.right_camera, kp.right_undistorted_pixel)
+
+        if !kp.is_stereo
+            kp.is_stereo = true
+            f.nb_stereo_kpts += 1
+        end
     end
 end
 
@@ -248,18 +293,30 @@ end
 
 function remove_keypoint!(f::Frame, kpid)
     lock(f.keypoints_lock) do
-        kpid in keys(f.keypoints) || return
+        kp = get(f.keypoints, kpid, nothing)
+        kp ≡ nothing && return
 
-        kp = f.keypoints[kpid]
         pop!(f.keypoints, kpid)
         remove_keypoint_from_grid!(f, kp)
 
         f.nb_keypoints -= 1
+        kp.is_stereo && (f.nb_stereo_kpts -= 1;)
         if kp.is_3d
             f.nb_3d_kpts -= 1
         else
             f.nb_2d_kpts -= 1
         end
+    end
+end
+
+function remove_stereo_keypoint!(f::Frame, kpid)
+    lock(f.keypoints_lock) do
+        kp = get(f.keypoints, kpid, nothing)
+        kp ≡ nothing && return
+        kp.is_stereo || return
+
+        kp.is_stereo = false
+        f.nb_stereo_kpts -= 1
     end
 end
 
@@ -345,12 +402,26 @@ function project_world_to_camera(f::Frame, point)
     end
 end
 
+function project_world_to_right_camera(f::Frame, point)
+    lock(f.pose_lock) do
+        f.right_camera.Ti0 * f.cw * to_homogeneous(point)
+    end
+end
+
 function project_world_to_image(f::Frame, point)
     project(f.camera, project_world_to_camera(f, point))
 end
 
+function project_world_to_right_image(f::Frame, point)
+    project(f.camera, f.right_camera.Ti0 * project_world_to_camera(f, point))
+end
+
 function project_world_to_image_distort(f::Frame, point)
     project_undistort(f.camera, project_world_to_camera(f, point))
+end
+
+function project_world_to_right_image_distort(f::Frame, point)
+    project_undistort(f.camera, project_world_to_right_camera(f, point))
 end
 
 function turn_keypoint_3d!(f::Frame, id)
@@ -479,6 +550,7 @@ function reset!(f::Frame)
 
     f.nb_2d_kpts = 0
     f.nb_3d_kpts = 0
+    f.nb_stereo_kpts = 0
     f.nb_keypoints = 0
     f.nb_occupied_cells = 0
     f.time = 0

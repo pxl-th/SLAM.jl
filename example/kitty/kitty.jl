@@ -2,6 +2,7 @@ using StaticArrays
 using LinearAlgebra
 using Printf
 using Images
+using Manifolds
 
 @inline function parse_matrix(line)
     m = parse.(Float64, split(line, " "))
@@ -36,33 +37,44 @@ struct KittyDataset
     Left camera (aka P0) intrinsic matrix.
     Dropped last column, which contains baselines in meters.
     """
-    K::SMatrix{3, 3, Float64}
+    K::SMatrix{4, 4, Float64, 16}
+    """
+    Transformation from 0-th camera to 1-st camera.
+    """
+    T::SMatrix{4, 4, Float64, 16}
     """
     Ground truth poses. Each pose transforms from the origin.
     """
-    poses::Vector{SMatrix{4, 4, Float64}}
-    """
-    Frames from the left camera.
-    """
-    frames_dir::String
+    poses::Vector{SMatrix{4, 4, Float64, 16}}
     """
     Vector of timestamps for each frame.
     """
     timestamps::Vector{Float64}
+    left_frames_dir::String
+    right_frames_dir::String
+    stereo::Bool
 end
 
-function KittyDataset(base_dir::String, sequence::String)
+function KittyDataset(base_dir::String, sequence::String; stereo::Bool)
     frames_dir = joinpath(base_dir, "sequences", sequence)
 
-    K_raw = readline(joinpath(frames_dir, "calib.txt"))[5:end]
-    K = parse_matrix(K_raw)[1:3, 1:3]
+    Ks = readlines(joinpath(frames_dir, "calib.txt"))
+    K1 = parse_matrix(Ks[1][5:end])
+    K1_inv = inv(K1)
+
+    KT2 = parse_matrix(Ks[2][5:end])
+    T12 = inv(SpecialEuclidean(3), K1_inv * KT2)
+
     timestamps = read_timestamps(joinpath(frames_dir, "times.txt"))
 
-    frames_dir = joinpath(frames_dir, "image_0")
+    left_frames_dir = joinpath(frames_dir, "image_0")
+    right_frames_dir = joinpath(frames_dir, "image_1")
+
     poses_file = joinpath(base_dir, "poses", sequence * ".txt")
     poses = read_poses(poses_file)
 
-    KittyDataset(K, poses, frames_dir, timestamps)
+    KittyDataset(
+        K1, T12, poses, timestamps, left_frames_dir, right_frames_dir, stereo)
 end
 
 function get_camera_poses(dataset::KittyDataset)
@@ -81,7 +93,16 @@ end
 
 Base.length(dataset::KittyDataset) = length(dataset.poses)
 function Base.getindex(dataset::KittyDataset, i)
-    joinpath(dataset.frames_dir, @sprintf("%.06d.png", i - 1)) |> load
+    left_image = load(joinpath(
+        dataset.left_frames_dir, @sprintf("%.06d.png", i - 1)))
+
+    right_image = left_image
+    if dataset.stereo
+        right_image = load(joinpath(
+            dataset.right_frames_dir, @sprintf("%.06d.png", i - 1)))
+    end
+
+    left_image, right_image
 end
 
 function Base.show(io::IO, d::KittyDataset)

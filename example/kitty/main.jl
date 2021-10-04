@@ -8,7 +8,9 @@ include("kitty.jl")
 function main(n_frames::Int)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
     sequence = "00"
-    dataset = KittyDataset(base_dir, sequence)
+    stereo = true
+
+    dataset = KittyDataset(base_dir, sequence; stereo)
     println(dataset)
 
     save_dir = joinpath("/home/pxl-th/projects", "2-kitty-$sequence")
@@ -24,19 +26,32 @@ function main(n_frames::Int)
     cx, cy = dataset.K[1:2, 3]
     height, width = 376, 1241
     # height, width = 370, 1226
+
     camera = SLAM.Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
+    right_camera = SLAM.Camera(
+        fx, fy, cx, cy, 0, 0, 0, 0, height, width; Ti0=dataset.T)
+
     params = Params(;
+        stereo,
         window_size=9, max_distance=35, pyramid_levels=3,
         max_nb_keypoints=1000, max_reprojection_error=3.0)
-    slam_manager = SlamManager(params, camera)
+
+    slam_manager = SlamManager(params, camera; right_camera)
     slam_manager_thread = Threads.@spawn run!(slam_manager)
 
     t1 = time()
 
     for i in 1:n_frames
         timestamp = dataset.timestamps[i]
-        frame = dataset[i] .|> Gray{Float64}
-        add_image!(slam_manager, frame, timestamp)
+        left_frame, right_frame = dataset[i]
+        left_frame = Gray{Float64}.(left_frame)
+
+        if params.stereo
+            right_frame = Gray{Float64}.(right_frame)
+            add_stereo_image!(slam_manager, left_frame, right_frame, timestamp)
+        else
+            add_image!(slam_manager, left_frame, timestamp)
+        end
 
         q_size = get_queue_size(slam_manager)
         f_size = length(slam_manager.mapper.estimator.frame_queue)
@@ -88,7 +103,7 @@ function main(n_frames::Int)
     # @load positions_save_file slam_positions
 
     visualizer = Visualizer((height, width))
-    markersize = 0.01 #minimum(max_bound .- min_bound) * 1e-2
+    markersize = 0.07
 
     lines!(
         visualizer.pc_axis, slam_positions;

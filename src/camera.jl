@@ -17,12 +17,21 @@ struct Camera
     # Image resolution.
     height::Int64
     width::Int64
+
+    """
+    Transformation from 0-th camera to i-th (this).
+    """
+    Ti0::SMatrix{4, 4, Float64, 16}
+    """
+    Transformation from i-th (this) camera to 0-th.
+    """
+    T0i::SMatrix{4, 4, Float64, 16}
 end
 
 function Camera(
     fx, fy, cx, cy, # Intrinsics.
     k1, k2, p1, p2, # Distortion coefficients.
-    height, width,
+    height, width; Ti0 = SMatrix{4, 4, Float64}(I),
 )
     K = SMatrix{3, 3, Float64, 9}(
         fx, 0.0, 0.0,
@@ -33,7 +42,8 @@ function Camera(
     Camera(
         fx, fy, cx, cy,
         k1, k2, p1, p2,
-        K, iK, height, width)
+        K, iK, height, width,
+        Ti0, inv(SE3, Ti0))
 end
 
 """

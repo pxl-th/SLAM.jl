@@ -53,9 +53,9 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
     # If it's the first frame, then KeyFrame is always needed.
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
-    @info "[FE] Old Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
+    # @info "[FE] Old Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
     set_wc!(fe.current_frame, fe.motion_model(fe.current_frame.wc, time))
-    @info "[FE] New Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
+    # @info "[FE] New Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
 
     klt_tracking!(fe)
 
@@ -415,8 +415,7 @@ function klt_tracking!(fe::FrontEnd)
         fe.current_frame, fe.previous_pyramid, fe.current_pyramid;
         window_size=fe.params.window_size,
         max_distance=fe.params.max_ktl_distance,
-        pyramid_levels=fe.params.pyramid_levels,
-        stereo=false, pyramid_levels_3d=1)
+        pyramid_levels=fe.params.pyramid_levels, stereo=false)
 end
 
 function reset_frame!(fe::FrontEnd)

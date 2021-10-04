@@ -1,6 +1,7 @@
 struct KeyFrame
     id::Int64
-    # image::Matrix{Gray}
+    left_pyramid::Union{Nothing, ImageTracking.LKPyramid}
+    right_image::Union{Nothing, Matrix{Gray{Float64}}}
 end
 
 mutable struct Mapper
@@ -42,6 +43,30 @@ function run!(mapper::Mapper)
             @error "[MP] Got invalid frame $(kf.id) from Map"
         @info "[MP] Get $(kf.id) KF"
 
+        if mapper.params.stereo
+            @info "[MP] Stereo Matching"
+            try
+                right_pyramid = ImageTracking.LKPyramid(
+                    kf.right_image, mapper.params.pyramid_levels;
+                    σ=mapper.params.pyramid_σ)
+
+                optical_flow_matching!(
+                    mapper.map_manager,
+                    new_keyframe, kf.left_pyramid, right_pyramid;
+                    window_size=mapper.params.window_size,
+                    max_distance=mapper.params.max_ktl_distance,
+                    pyramid_levels=mapper.params.pyramid_levels, stereo=true)
+
+                vimage = RGB{Float64}.(kf.right_image)
+                draw_keypoints!(vimage, new_keyframe; right=true)
+                save("/home/pxl-th/projects/slam-data/images/frame-$(new_keyframe.id)-right.png", vimage)
+            catch e
+                showerror(stdout, e)
+                display(stacktrace(catch_backtrace()))
+            end
+            @info "[MP] Stereo Matched"
+        end
+
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
             lock(mapper.map_manager.map_lock)
             try
@@ -70,6 +95,7 @@ function run!(mapper::Mapper)
         end
         # Update the map points and the covisibility graph between KeyFrames.
         update_frame_covisibility!(mapper.map_manager, new_keyframe)
+
         # if kf.id > 0
         #     try
         #         match_local_map!(mapper, new_keyframe)
