@@ -388,3 +388,112 @@ function merge_mappoints(m::MapManager, prev_id, new_id)
         unlock(m.mappoint_lock)
     end
 end
+
+function optical_flow_matching!(
+    map_manager::MapManager, frame::Frame,
+    from_pyramid::ImageTracking.LKPyramid,
+    to_pyramid::ImageTracking.LKPyramid;
+    window_size::Int64, max_distance::Float64, pyramid_levels::Int64,
+    stereo::Bool, pyramid_levels_3d = 1,
+)
+    ids = Vector{Int64}(undef, frame.nb_keypoints)
+    pixels = Vector{Point2f}(undef, frame.nb_keypoints)
+
+    ids3d = Vector{Int64}(undef, frame.nb_3d_kpts)
+    pixels3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
+    displacements3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
+
+    i, i3d = 1, 1
+    scale = 1.0 / 2.0^pyramid_levels_3d
+
+    keypoints = stereo ? get_keypoints(frame) : values(frame.keypoints)
+    for kp in keypoints
+        if !kp.is_3d
+            pixels[i] = kp.pixel
+            ids[i] = kp.id
+            i += 1
+            continue
+        end
+
+        mp = stereo ?
+            get_mappoint(map_manager, kp.id) :
+            map_manager.map_points[kp.id]
+        mp ≡ nothing &&
+            (remove_mappoint_obs!(map_manager, kp.id, frame.kfid); continue)
+
+        position = get_position(mp)
+        projection = stereo ?
+            project_world_to_right_image_distort(frame, position) :
+            project_world_to_image_distort(frame, position)
+
+        if stereo
+            if in_right_image(frame, projection)
+                ids3d[i3d] = kp.id
+                pixels3d[i3d] = kp.pixel
+                displacements3d[i3d] = scale .* (projection .- kp.pixel)
+                i3d += 1
+            else
+                remove_mappoint_obs!(map_manager, kp.id, frame.kfid)
+                continue
+            end
+        else
+            if in_image(frame, projection)
+                ids3d[i3d] = kp.id
+                pixels3d[i3d] = kp.pixel
+                displacements3d[i3d] = scale .* (projection .- kp.pixel)
+                i3d += 1
+            end
+        end
+    end
+
+    i3d -= 1
+    ids3d = @view(ids3d[1:i3d])
+    pixels3d = @view(pixels3d[1:i3d])
+    displacements3d = @view(displacements3d[1:i3d])
+
+    failed_3d = true
+    if !isempty(ids3d)
+        new_keypoints, status = fb_tracking!(
+            from_pyramid, to_pyramid, pixels3d;
+            displacement=displacements3d,
+            pyramid_levels=pyramid_levels_3d,
+            window_size, max_distance)
+
+        nb_good = 0
+        for j in 1:length(status)
+            if status[j]
+                # TODO check stereo && update_stereo_keypoint
+                update_keypoint!(frame, ids3d[j], new_keypoints[j])
+                nb_good += 1
+            else
+                # If failed → add to track with 2d keypoints w/o prior.
+                pixels[i] = pixels3d[j]
+                ids[i] = ids3d[j]
+                i += 1
+            end
+        end
+        @info "[FE] 3D Points tracked $nb_good."
+        failed_3d = nb_good < 0.33 * length(ids3d)
+    end
+
+    i -= 1
+    pixels = @view(pixels[1:i])
+    ids = @view(ids[1:i])
+
+    isempty(pixels) && return
+    new_keypoints, status = fb_tracking!(
+        from_pyramid, to_pyramid, pixels;
+        pyramid_levels, window_size, max_distance)
+
+    for j in 1:length(new_keypoints)
+        if stereo
+            # TODO check stereo && update_stereo_keypoint!
+        else
+            if status[j]
+                update_keypoint!(frame, ids[j], new_keypoints[j])
+            else
+                remove_obs_from_current_frame!(map_manager, ids[j])
+            end
+        end
+    end
+end

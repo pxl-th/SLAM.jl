@@ -468,6 +468,9 @@ function get_surrounding_keypoints(f::Frame, pixel::Point2f)
     keypoints
 end
 
+in_image(f::Frame, point) = in_image(f.camera, point)
+in_right_image(f::Frame, point) = in_image(f.right_camera, point)
+
 function reset!(f::Frame)
     lock(f.covisibility_lock)
     lock(f.keypoints_lock)

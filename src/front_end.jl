@@ -9,7 +9,6 @@ mutable struct FrontEnd
 
     current_pyramid::ImageTracking.LKPyramid
     previous_pyramid::ImageTracking.LKPyramid
-    keyframe_pyramid::ImageTracking.LKPyramid
 
     p3p_required::Bool
 end
@@ -21,7 +20,7 @@ function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
     FrontEnd(
         frame, MotionModel(), map_manager, params,
         Matrix{Gray{Float64}}(undef, 0, 0), Matrix{Gray{Float64}}(undef, 0, 0),
-        empty_pyr, empty_pyr, empty_pyr, false)
+        empty_pyr, empty_pyr, false)
 end
 
 function track!(fe::FrontEnd, image, time)
@@ -38,7 +37,6 @@ function track!(fe::FrontEnd, image, time)
 
         if is_kf_required
             create_keyframe!(fe.map_manager, image)
-            fe.keyframe_pyramid = fe.current_pyramid
         end
         is_kf_required
     catch e
@@ -412,90 +410,13 @@ function preprocess!(fe::FrontEnd, image)
 end
 
 function klt_tracking!(fe::FrontEnd)
-    prior_ids = Vector{Int64}(undef, fe.current_frame.nb_keypoints)
-    prior_pixels = Vector{Point2f}(undef, fe.current_frame.nb_keypoints)
-
-    displacements_3d = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
-    prior_3d_ids = Vector{Int64}(undef, fe.current_frame.nb_3d_kpts)
-    prior_3d_pixels = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
-
-    i, i3d = 1, 1
-    prior_pyramid_levels = 1 #fe.params.pyramid_levels
-    scale = 1.0 / 2.0^prior_pyramid_levels
-
-    # Select points to track.
-    for kp in values(fe.current_frame.keypoints)
-        if !(fe.params.use_prior && kp.is_3d)
-            # Init prior with previous pixel positions.
-            prior_pixels[i] = kp.pixel
-            prior_ids[i] = kp.id
-            i += 1
-            continue
-        end
-
-        # If using prior, init pixel positions using motion model.
-        # Projection in `(y, x)` format.
-        projection = project_world_to_image_distort(
-            fe.current_frame, get_position(fe.map_manager.map_points[kp.id]))
-        in_image(fe.current_frame.camera, projection) || continue
-
-        displacements_3d[i3d] = scale .* (projection .- kp.pixel)
-        prior_3d_pixels[i3d] = kp.pixel
-        prior_3d_ids[i3d] = kp.id
-        i3d += 1
-    end
-
-    i3d -= 1
-    displacements_3d = @view(displacements_3d[1:i3d])
-    prior_3d_pixels = @view(prior_3d_pixels[1:i3d])
-    prior_3d_ids = @view(prior_3d_ids[1:i3d])
-
-    # First, track 3d keypoints, if using prior.
-    if fe.params.use_prior && !isempty(displacements_3d)
-        new_keypoints, status = fb_tracking!(
-            fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
-            pyramid_levels=prior_pyramid_levels,
-            window_size=fe.params.window_size,
-            max_distance=fe.params.max_ktl_distance)
-
-        nb_good = 0
-        for j in 1:length(new_keypoints)
-            if status[j]
-                update_keypoint!(
-                    fe.current_frame, prior_3d_ids[j], new_keypoints[j])
-                nb_good += 1
-            else
-                # If failed, re-add keypoint to try with the full pyramid.
-                prior_pixels[i] = prior_3d_pixels[j]
-                prior_ids[i] = prior_3d_ids[j]
-                i += 1
-            end
-        end
-        @info "[FE] 3D Points tracked $nb_good."
-        # If motion model is wrong, require P3P next.
-        nb_good < 0.33 * length(displacements_3d) && (fe.p3p_required = true;)
-    end
-
-    i -= 1
-    prior_pixels = @view(prior_pixels[1:i])
-    prior_ids = @view(prior_ids[1:i])
-
-    # Track other prior keypoints, if any.
-    isempty(prior_pixels) && return
-    new_keypoints, status = fb_tracking!(
-        fe.previous_pyramid, fe.current_pyramid, prior_pixels;
-        pyramid_levels=fe.params.pyramid_levels,
+    optical_flow_matching!(
+        fe.map_manager,
+        fe.current_frame, fe.previous_pyramid, fe.current_pyramid;
         window_size=fe.params.window_size,
-        max_distance=fe.params.max_ktl_distance)
-
-    # Either update or remove keypoints.
-    for i in 1:length(new_keypoints)
-        if status[i] && in_image(fe.current_frame.camera, new_keypoints[i])
-            update_keypoint!(fe.current_frame, prior_ids[i], new_keypoints[i])
-        else
-            remove_obs_from_current_frame!(fe.map_manager, prior_ids[i])
-        end
-    end
+        max_distance=fe.params.max_ktl_distance,
+        pyramid_levels=fe.params.pyramid_levels,
+        stereo=false, pyramid_levels_3d=1)
 end
 
 function reset_frame!(fe::FrontEnd)
@@ -516,7 +437,6 @@ function reset!(fe::FrontEnd)
         [Matrix{Gray{Float64}}(undef, 0, 0)],
         nothing, nothing, nothing, nothing, nothing,
     )
-    fe.keyframe_pyramid = empty_pyr
     fe.previous_pyramid = empty_pyr
     fe.current_pyramid = empty_pyr
 end

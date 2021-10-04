@@ -71,9 +71,11 @@ end
 Check if `point` is in the image bounds of the `Camera`.
 
 # Arguments:
-- `point::Point2`: Point to check. In `(y, x)` format.
+- `point`: Point to check. In `(y, x)` format.
 """
-in_image(c::Camera, point::Point2) = all(1 .≤ point .≤ (c.height, c.width))
+function in_image(c::Camera, point)
+    1 ≤ point[1] ≤ c.height && 1 ≤ point[2] ≤ c.width
+end
 
 """
 # Arguments:
