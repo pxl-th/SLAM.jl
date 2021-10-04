@@ -88,7 +88,7 @@ function main(n_frames::Int)
     # @load positions_save_file slam_positions
 
     visualizer = Visualizer((height, width))
-    markersize = minimum(max_bound .- min_bound) * 1e-2
+    markersize = 0.01 #minimum(max_bound .- min_bound) * 1e-2
 
     lines!(
         visualizer.pc_axis, slam_positions;

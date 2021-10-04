@@ -70,14 +70,14 @@ function run!(mapper::Mapper)
         end
         # Update the map points and the covisibility graph between KeyFrames.
         update_frame_covisibility!(mapper.map_manager, new_keyframe)
-        if kf.id > 0
-            try
-                match_local_map!(mapper, new_keyframe)
-            catch e
-                showerror(stdout, e)
-                display(stacktrace(catch_backtrace()))
-            end
-        end
+        # if kf.id > 0
+        #     try
+        #         match_local_map!(mapper, new_keyframe)
+        #     catch e
+        #         showerror(stdout, e)
+        #         display(stacktrace(catch_backtrace()))
+        #     end
+        # end
 
         # Send new KF to estimator for bundle adjustment.
         @debug "[MP] Sending new Keyframe to Estimator."

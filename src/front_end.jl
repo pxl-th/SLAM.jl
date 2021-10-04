@@ -407,7 +407,7 @@ function preprocess!(fe::FrontEnd, image)
     fe.previous_pyramid = fe.current_pyramid
 
     fe.current_pyramid = ImageTracking.LKPyramid(
-        image, fe.params.pyramid_levels)
+        image, fe.params.pyramid_levels; σ=fe.params.pyramid_σ)
     fe.current_image = image
 end
 
@@ -420,7 +420,8 @@ function klt_tracking!(fe::FrontEnd)
     prior_3d_pixels = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
 
     i, i3d = 1, 1
-    scale = 1.0 / 2.0^fe.params.pyramid_levels
+    prior_pyramid_levels = 1 #fe.params.pyramid_levels
+    scale = 1.0 / 2.0^prior_pyramid_levels
 
     # Select points to track.
     for kp in values(fe.current_frame.keypoints)
@@ -453,7 +454,7 @@ function klt_tracking!(fe::FrontEnd)
     if fe.params.use_prior && !isempty(displacements_3d)
         new_keypoints, status = fb_tracking!(
             fe.previous_pyramid, fe.current_pyramid, prior_3d_pixels;
-            pyramid_levels=fe.params.pyramid_levels,
+            pyramid_levels=prior_pyramid_levels,
             window_size=fe.params.window_size,
             max_distance=fe.params.max_ktl_distance)
 

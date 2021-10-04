@@ -3,7 +3,7 @@ Base.@kwdef mutable struct Params
     """
     Cell size of the grid in the Frame.
     """
-    max_distance::Int64 = 50
+    max_distance::Int64 = 35
     """
     Maximum distance a point can shift to be considered inlier in KTL tracking.
     """
@@ -14,11 +14,12 @@ Base.@kwdef mutable struct Params
     Otherwise, total number of levels is L + 1.
     """
     pyramid_levels::Int64 = 3
+    pyramid_σ::Float64 = 1.0
     """
     Size of the window for the KTL tracking.
     Actual size is `2 * S + 1`.
     """
-    window_size::Int64 = 31
+    window_size::Int64 = 9
     """
     Use prior motion model to estimate subsequent position of keypoints
     in the next frame.

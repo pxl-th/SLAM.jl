@@ -93,10 +93,6 @@ function extract_keypoints!(m::MapManager, image)
 
     descriptors, keypoints = describe(m.extractor, image, keypoints)
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
-
-    vimage = RGB{Float64}.(image)
-    draw_keypoints!(vimage, m.current_frame)
-    save("/home/pxl-th/projects/slam-data/images/frame-$(m.current_frame.id).png", vimage)
 end
 
 function add_keypoints_to_frame!(m::MapManager, frame, keypoints, descriptors)

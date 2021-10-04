@@ -33,7 +33,7 @@ function _shi_tomasi(image, n_keypoints::Int; min_response::Real = 1e-4)
     nb_detected = 0
     for p in P
         maxima_corner = maxima[p]
-        min_response < responses[maxima_corner] || continue
+        responses[maxima_corner] < min_response && continue
         corners[maxima_corner] = true
         nb_detected += 1
     end
@@ -59,22 +59,24 @@ Detect keypoints in the `image`.
     Keypoints in the `(y, x)` format.
 """
 function detect(
-    e::Extractor, image, current_points; σ::Real = 3,
+    e::Extractor, image, current_points; σ_mask::Real = 3,
 )::Vector{CartesianIndex{2}}
     length(current_points) ≥ e.max_points && return CartesianIndex{2}[]
 
     if !isempty(current_points)
         mask = get_mask(image, current_points, e.radius)
-        # Smooth out image, to avoid detecting features on the circle edges.
-        σ ≉ 0 && (mask = imfilter(mask, Kernel.gaussian(σ));)
+        # Smooth out mask, to avoid detecting features on the circle edges.
+        σ_mask ≉ 0 && (mask = imfilter(mask, Kernel.gaussian(σ_mask));)
         image = image .* mask
     end
 
-    features = CartesianIndex{2}[]
-
     height, width = size(image)
     n_cells = e.grid_resolution[1] * e.grid_resolution[2]
-    n_cell_detect = ceil(Int, (e.max_points - length(current_points)) / n_cells)
+    n_detect = e.max_points - length(current_points)
+    n_cell_detect = ceil(Int, n_detect / n_cells)
+
+    features = CartesianIndex{2}[]
+    sizehint!(features, n_detect)
 
     for y in 0:(e.grid_resolution[1] - 1), x in 0:(e.grid_resolution[2] - 1)
         y_shift, x_shift = y * e.cell_size, x * e.cell_size
