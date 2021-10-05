@@ -43,14 +43,14 @@ Params:
     CartesianIndex(x...)
 end
 
-function to_4x4(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
+function to_4x4(m::SMatrix{3, 3, T, 9}) where T
     SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
         0,       0,       0,       1)
 end
-function to_4x4(m::SMatrix{3, 4, T})::SMatrix{4, 4, T} where T
+function to_4x4(m::SMatrix{3, 4, T, 12}) where T
     SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,

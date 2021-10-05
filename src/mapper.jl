@@ -44,7 +44,6 @@ function run!(mapper::Mapper)
         @info "[MP] Get $(kf.id) KF"
 
         if mapper.params.stereo
-            @info "[MP] Stereo Matching"
             try
                 right_pyramid = ImageTracking.LKPyramid(
                     kf.right_image, mapper.params.pyramid_levels;
@@ -56,6 +55,21 @@ function run!(mapper::Mapper)
                     window_size=mapper.params.window_size,
                     max_distance=mapper.params.max_ktl_distance,
                     pyramid_levels=mapper.params.pyramid_levels, stereo=true)
+                @info "[MP] Stereo Keypoints: $(new_keyframe.nb_stereo_kpts)"
+
+                if new_keyframe.nb_stereo_kpts > 0
+                    lock(mapper.map_manager.map_lock)
+                    try
+                        triangulate_stereo!(
+                            mapper.map_manager, new_keyframe;
+                            max_error=mapper.params.max_reprojection_error)
+                    catch e
+                        showerror(stdout, e)
+                        display(stacktrace(catch_backtrace()))
+                    finally
+                        unlock(mapper.map_manager.map_lock)
+                    end
+                end
 
                 vimage = RGB{Float64}.(kf.right_image)
                 draw_keypoints!(vimage, new_keyframe; right=true)
@@ -64,13 +78,14 @@ function run!(mapper::Mapper)
                 showerror(stdout, e)
                 display(stacktrace(catch_backtrace()))
             end
-            @info "[MP] Stereo Matched"
         end
 
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
             lock(mapper.map_manager.map_lock)
             try
-                triangulate_temporal!(mapper, new_keyframe)
+                triangulate_temporal!(
+                    mapper.map_manager, new_keyframe;
+                    max_error=mapper.params.max_reprojection_error)
             catch e
                 showerror(stdout, e)
                 display(stacktrace(catch_backtrace()))
@@ -114,34 +129,73 @@ function run!(mapper::Mapper)
     wait(mapper.estimator_thread)
 end
 
-function triangulate_temporal!(mapper::Mapper, frame::Frame)
+function triangulate_stereo!(map_manager::MapManager, frame::Frame; max_error)
+    stereo_keypoints = get_stereo_keypoints(frame)
+    if isempty(stereo_keypoints)
+        @warn "[MP] No stereo keypoints to triangulate."
+        return
+    end
+
+    P1 = to_4x4(frame.camera.K) * SMatrix{4, 4, Float64, 16}(I)
+    P2 = to_4x4(frame.right_camera.K) * frame.right_camera.Ti0
+
+    n_good = 0
+    for kp in stereo_keypoints
+        kp.is_3d && continue
+        mp = get_mappoint(map_manager, kp.id)
+        mp ≡ nothing &&
+            (remove_mappoint_obs!(map_manager, kp.id, frame.kfid); continue)
+        mp.is_3d && continue
+
+        left_point = iterative_triangulation(
+            kp.undistorted_pixel[[2, 1]], kp.right_undistorted_pixel[[2, 1]],
+            P1, P2)
+        left_point *= -1.0 / left_point[4] # TODO why -1.0 and not 1.0????????
+        left_point[3] < 0.1 && (remove_stereo_keypoint!(frame, kp.id); continue)
+
+        right_point = frame.right_camera.Ti0 * left_point
+        right_point[3] < 0.1 && (remove_stereo_keypoint!(frame, kp.id); continue)
+
+        left_projection = project(frame.camera, left_point[1:3])
+        lrepr = norm(kp.undistorted_pixel .- left_projection)
+        lrepr > max_error && (remove_stereo_keypoint!(frame, kp.id); continue)
+
+        right_projection = project(frame.right_camera, right_point[1:3])
+        rrepr = norm(kp.right_undistorted_pixel .- right_projection)
+        rrepr > max_error && (remove_stereo_keypoint!(frame, kp.id); continue)
+
+        wpt = project_camera_to_world(frame, left_point)[1:3]
+        update_mappoint!(map_manager, kp.id, wpt)
+        n_good += 1
+    end
+    @info "[MP] Stereo triangulation: $n_good Keypoints | $(frame.nb_3d_kpts)"
+end
+
+function triangulate_temporal!(map_manager::MapManager, frame::Frame; max_error)
     keypoints = get_2d_keypoints(frame)
-    @info "[MP] Triangulating $(length(keypoints)) Keypoints..."
     if isempty(keypoints)
         @warn "[MP] No 2D keypoints to triangulate."
         return
     end
-    K = to_4x4(frame.camera.K)
-    P1 = K * SMatrix{4, 4, Float64, 16}(I)
 
-    good, candidates = 0, 0
+    @info "[MP] Triangulating $(length(keypoints)) Keypoints..."
+    K = to_4x4(frame.camera.K)
+    # P1 - previous Keyframe, P2 - this `frame`.
+    P1 = K * SMatrix{4, 4, Float64, 16}(I)
+    P2 = K * SMatrix{4, 4, Float64, 16}(I)
+
+    good = 0
     rel_kfid = -1
     # frame -> observer key frame.
     rel_pose::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
     rel_pose_inv::SMatrix{4, 4, Float64, 16} = SMatrix{4, 4, Float64, 16}(I)
 
-    cam = frame.camera
-    max_error = mapper.params.max_reprojection_error
-
-    # Go through all 2D keypoints in `frame`.
     for kp in keypoints
         @assert !kp.is_3d
-        # Remove mappoints observation if not in map.
-        if !(kp.id in keys(mapper.map_manager.map_points))
-            remove_mappoint_obs!(mapper.map_manager, kp.id, frame.kfid)
-            continue
-        end
-        map_point = get_mappoint(mapper.map_manager, kp.id)
+
+        map_point = get_mappoint(map_manager, kp.id)
+        map_point ≡ nothing &&
+            (remove_mappoint_obs!(map_manager, kp.id, frame.kfid); continue)
         map_point.is_3d && continue
 
         # Get first KeyFrame id from the set of mappoint observers.
@@ -150,8 +204,7 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
         kfid = observers[1]
         frame.kfid == kfid && continue
 
-        # Get 1st KeyFrame observation for the MapPoint.
-        observer_kf = get_keyframe(mapper.map_manager, kfid)
+        observer_kf = get_keyframe(map_manager, kfid)
         if observer_kf ≡ nothing
             @error "[MP] Missing observer for triangulation."
             continue # TODO should this be possible?
@@ -163,51 +216,39 @@ function triangulate_temporal!(mapper::Mapper, frame::Frame)
             rel_pose = observer_kf.cw * frame.wc
             rel_pose_inv = inv(SE3, rel_pose)
             rel_kfid = kfid
+            P2 = K * rel_pose_inv
         end
 
-        # Get observer keypoint.
         observer_kp = get_keypoint(observer_kf, kp.id)
         observer_kp ≡ nothing && continue
         obup = observer_kp.undistorted_pixel
         kpup = kp.undistorted_pixel
 
-        parallax = norm(obup .- project(cam, rel_pose[1:3, 1:3] * kp.position))
-        candidates += 1
+        parallax = norm(
+            obup .- project(frame.camera, rel_pose[1:3, 1:3] * kp.position))
 
-        # Compute 3D pose and check if it is good.
-        # Note, that we use inverted relative pose.
-        left_point = iterative_triangulation(
-            obup[[2, 1]], kpup[[2, 1]], P1, K * rel_pose_inv)
-        if left_point[4] ≈ 0.0 || left_point[4] > 1e6
-            @error "[MP] Failed triangulation, singular value."
-            continue
-        end
-
+        left_point = iterative_triangulation(obup[[2, 1]], kpup[[2, 1]], P1, P2)
         left_point *= 1.0 / left_point[4]
-        # Project into the right camera (new KeyFrame).
+        left_point[3] < 0.1 && parallax > 20.0 && (remove_mappoint_obs!(
+            map_manager, observer_kp.id, frame.kfid); continue)
+
         right_point = rel_pose_inv * left_point
+        right_point[3] < 0.1 && parallax > 20.0 && (remove_mappoint_obs!(
+            map_manager, observer_kp.id, frame.kfid); continue)
 
-        # Ensure that 3D point is in front of the both cameras.
-        if left_point[3] < 0.1 || right_point[3] < 0.1
-            parallax > 20 && remove_mappoint_obs!(
-                mapper.map_manager, observer_kp.id, frame.kfid)
-            continue
-        end
+        lrepr = norm(project(frame.camera, left_point[1:3]) .- obup)
+        lrepr > max_error && parallax > 20.0 && (remove_mappoint_obs!(
+            map_manager, observer_kp.id, frame.kfid); continue)
 
-        # Remove MapPoint with high reprojection error.
-        lrepr = norm(project(cam, left_point[1:3]) .- obup)
-        rrepr = norm(project(cam, right_point[1:3]) .- kpup)
-        if lrepr > max_error || rrepr > max_error
-            parallax > 20 && remove_mappoint_obs!(
-                mapper.map_manager, observer_kp.id, frame.kfid)
-            continue
-        end
-        # 3D pose is good, update MapPoint and related Frames.
+        rrepr = norm(project(frame.camera, right_point[1:3]) .- kpup)
+        rrepr > max_error && parallax > 20.0 && (remove_mappoint_obs!(
+            map_manager, observer_kp.id, frame.kfid); continue)
+
         wpt = project_camera_to_world(observer_kf, left_point)[1:3]
-        update_mappoint!(mapper.map_manager, kp.id, wpt)
+        update_mappoint!(map_manager, kp.id, wpt)
         good += 1
     end
-    @info "[MP] Temporal triangulation: $good/$candidates good KeyPoints."
+    @info "[MP] Temporal triangulation: $good good KeyPoints."
 end
 
 """
@@ -232,14 +273,11 @@ function match_local_map!(mapper::Mapper, frame::Frame)
         co_kf ≢ nothing && union!(frame.local_map_ids, co_kf.local_map_ids)
         # TODO if still not enough, go for another round.
     end
-    @debug "[MP] Local Map candidates $(length(frame.local_map_ids))."
 
     prev_new_map = do_local_map_matching(
         mapper, frame, frame.local_map_ids;
         max_projection_distance=mapper.params.max_projection_distance,
         max_descriptor_distance=mapper.params.max_descriptor_distance)
-    @debug "[MP] New Matching: $(length(prev_new_map))."
-    # display(prev_new_map); println()
 
     isempty(prev_new_map) || merge_matches(mapper, prev_new_map)
 end
@@ -278,7 +316,6 @@ function do_local_map_matching(
     hfov = 0.5 * frame.camera.width / frame.camera.fx
     max_rad_fov = vfov > hfov ? atan(vfov) : atan(hfov)
     view_threshold = cos(max_rad_fov)
-    @debug "[MP] View threshold $view_threshold."
 
     # Define max distance from projection.
     frame.nb_3d_kpts < 30 && (max_projection_distance *= 2.0;)
@@ -408,6 +445,7 @@ function find_best_match(
         end
     end
 
+    # TODO is this necessary?
     # best_id != -1 && second_id != -1 &&
     #     0.9 * second_distance < best_distance && (best_id = -1;)
 

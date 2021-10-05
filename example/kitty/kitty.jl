@@ -60,10 +60,14 @@ function KittyDataset(base_dir::String, sequence::String; stereo::Bool)
 
     Ks = readlines(joinpath(frames_dir, "calib.txt"))
     K1 = parse_matrix(Ks[1][5:end])
-    K1_inv = inv(K1)
+    K1_inv = SMatrix{4, 4, Float64}(xi ≈ 0.0 ? 0.0 : xi for xi in inv(K1))
 
     KT2 = parse_matrix(Ks[2][5:end])
+
+    @info "{PPSSE"
+
     T12 = inv(SpecialEuclidean(3), K1_inv * KT2)
+    T12 = SMatrix{4, 4, Float64}(abs(xi) < 1e-6 ? 0.0 : xi for xi in T12)
 
     timestamps = read_timestamps(joinpath(frames_dir, "times.txt"))
 

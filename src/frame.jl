@@ -144,6 +144,18 @@ function get_3d_keypoints(f::Frame)
     end
 end
 
+function get_stereo_keypoints(f::Frame)
+    lock(f.keypoints_lock) do
+        kps = Vector{Keypoint}(undef, f.nb_stereo_kpts)
+        i = 1
+        for k in values(f.keypoints)
+            k.is_stereo && (kps[i] = deepcopy(k); i += 1;)
+        end
+        @assert (i - 1) == f.nb_stereo_kpts
+        kps
+    end
+end
+
 function get_3d_keypoints_nb(f::Frame)
     lock(f.keypoints_lock) do
         return f.nb_3d_kpts
