@@ -1,6 +1,6 @@
 module SLAM
-export SlamManager, add_image!, get_queue_size
-export Params, Camera, run!, to_cartesian, Visualizer
+export SlamManager, add_image!, add_stereo_image!, get_queue_size
+export Params, Camera, run!, to_cartesian, Visualizer, reset!
 
 using OrderedCollections: OrderedSet, OrderedDict
 using GLMakie
@@ -43,14 +43,14 @@ Params:
     CartesianIndex(x...)
 end
 
-function to_4x4(m::StaticMatrix{3, 3, T})::SMatrix{4, 4, T} where T
+function to_4x4(m::SMatrix{3, 3, T, 9}) where T
     SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
         0,       0,       0,       1)
 end
-function to_4x4(m::SMatrix{3, 4, T})::SMatrix{4, 4, T} where T
+function to_4x4(m::SMatrix{3, 4, T, 12}) where T
     SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
@@ -83,6 +83,7 @@ mutable struct SlamManager
     params::Params
 
     image_queue::Vector{Matrix{Gray{Float64}}}
+    right_image_queue::Vector{Matrix{Gray{Float64}}}
     time_queue::Vector{Float64}
 
     current_frame::Frame
@@ -100,15 +101,22 @@ mutable struct SlamManager
     image_lock::ReentrantLock
 end
 
-function SlamManager(params::Params, camera::Camera)
+function SlamManager(
+    params::Params, camera::Camera;
+    right_camera::Union{Nothing, Camera} = nothing,
+)
+    params.stereo && right_camera ≡ nothing &&
+        error("[SM] Provide `right_camera` when in stereo mode.")
+
     avoidance_radius = max(5, params.max_distance ÷ 2)
     image_resolution = (camera.height, camera.width)
     grid_resolution = ceil.(Int64, image_resolution ./ params.max_distance)
 
     image_queue = Matrix{Gray{Float64}}[]
+    right_image_queue = Matrix{Gray{Float64}}[]
     time_queue = Float64[]
 
-    frame = Frame(;camera, cell_size=params.max_distance)
+    frame = Frame(;camera, right_camera, cell_size=params.max_distance)
     extractor = Extractor(
         params.max_nb_keypoints, avoidance_radius,
         grid_resolution, params.max_distance)
@@ -118,11 +126,11 @@ function SlamManager(params::Params, camera::Camera)
 
     mapper = Mapper(params, map_manager, frame)
     mapper_thread = Threads.@spawn run!(mapper)
-    @info "[SM] Launched mapper thread."
+    @debug "[SM] Launched mapper thread."
 
     SlamManager(
-        params,
-        image_queue, time_queue, frame, frame.id,
+        params, image_queue, right_image_queue,
+        time_queue, frame, frame.id,
         front_end, map_manager, mapper, extractor,
         camera, false, mapper_thread, ReentrantLock())
 end
@@ -135,12 +143,33 @@ function add_image!(sm::SlamManager, image, time)
     end
 end
 
+function add_stereo_image!(sm::SlamManager, image, right_image, time)
+    lock(sm.image_lock) do
+        push!(sm.image_queue, image)
+        push!(sm.right_image_queue, right_image)
+        push!(sm.time_queue, time)
+        @debug "[SM] Stereo image queue size $(length(sm.image_queue))."
+    end
+end
+
 function get_image!(sm::SlamManager)
     lock(sm.image_lock) do
         isempty(sm.image_queue) && return nothing, nothing
         image = popfirst!(sm.image_queue)
         time = popfirst!(sm.time_queue)
         image, time
+    end
+end
+
+function get_stereo_image!(sm::SlamManager)
+    lock(sm.image_lock) do
+        (isempty(sm.image_queue) || isempty(sm.right_image_queue)) &&
+            return nothing, nothing, 0.0
+
+        image = popfirst!(sm.image_queue)
+        right_image = popfirst!(sm.right_image_queue)
+        time = popfirst!(sm.time_queue)
+        image, right_image, time
     end
 end
 
@@ -151,8 +180,16 @@ function get_queue_size(sm::SlamManager)
 end
 
 function run!(sm::SlamManager)
+    image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
+    right_image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
+    time = 0.0
+
     while !(sm.exit_required)
-        image, time = get_image!(sm)
+        if sm.params.stereo
+            image, right_image, time = get_stereo_image!(sm)
+        else
+            image, time = get_image!(sm)
+        end
         if image ≡ nothing
             sleep(1e-2)
             continue
@@ -169,17 +206,21 @@ function run!(sm::SlamManager)
             reset!(sm)
             continue
         end
+
         # Create new KeyFrame if needed.
         # Send it to the mapper queue for traingulation.
         is_kf_required || continue
 
-        add_new_kf!(sm.mapper, KeyFrame(sm.current_frame.kfid))
+        add_new_kf!(sm.mapper, KeyFrame(
+            sm.current_frame.kfid,
+            sm.params.stereo ? sm.front_end.current_pyramid : nothing,
+            sm.params.stereo ? right_image : nothing))
         sleep(1e-2)
     end
 
     sm.mapper.exit_required = true
     wait(sm.mapper_thread)
-    @info "[SM] Exit required."
+    @debug "[SM] Exit required."
 end
 
 function reset!(sm::SlamManager)
@@ -192,13 +233,19 @@ function reset!(sm::SlamManager)
     @warn "[Slam Manager] Reset applied."
 end
 
-function draw_keypoints!(image::Matrix{T}, frame::Frame) where T <: RGB
+function draw_keypoints!(
+    image::Matrix{T}, frame::Frame; right::Bool = false,
+) where T <: RGB
     radius = 2
     for kp in values(frame.keypoints)
-        in_image(frame.camera, kp.pixel) || continue
+        right && !kp.is_stereo && continue
+
+        pixel = (right && kp.is_stereo) ? kp.right_pixel : kp.pixel
+        in_image(frame.camera, pixel) || continue
+
         color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
         kp.is_retracked && (color = T(1, 0, 0);)
-        draw!(image, CirclePointRadius(to_cartesian(kp.pixel), radius), color)
+        draw!(image, CirclePointRadius(to_cartesian(pixel), radius), color)
     end
     image
 end
@@ -209,7 +256,8 @@ precompile(compute_pose!, (FrontEnd,))
 precompile(compute_pose_5pt!, (FrontEnd,))
 
 precompile(run!, (Mapper,))
-precompile(triangulate_temporal!, (Mapper, Frame,))
+precompile(triangulate_stereo!, (MapManager, Frame, Float64))
+precompile(triangulate_temporal!, (MapManager, Frame, Float64))
 
 precompile(run!, (Estimator,))
 precompile(local_bundle_adjustment!, (Estimator, Frame,))

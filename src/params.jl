@@ -1,4 +1,5 @@
 Base.@kwdef mutable struct Params
+    stereo::Bool = false
     max_nb_keypoints::Int64 = 1000
     """
     Cell size of the grid in the Frame.
@@ -66,12 +67,17 @@ Base.@kwdef mutable struct Params
     Indicates whether system is performing Local Bundle-Adjustment now.
     """
     local_ba_on::Bool = false
+    do_local_matching::Bool = false
     """
     Maximum distance between projected and target pixels.
     Used during matching to local map.
     """
     max_projection_distance::Float64 = 2.0
     max_descriptor_distance::Float64 = 0.35
+    """
+    Whether to do map filtering to remove low-information KeyFrames.
+    """
+    map_filtering::Bool = false
 end
 
 function reset!(p::Params)

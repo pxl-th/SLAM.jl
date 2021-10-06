@@ -44,7 +44,7 @@ function bundle_adjustment!(
     )
     θ1 = Y1.minimizer
     n_outliers = _ba_detect_outliers!(cache, θ1, camera; repr_ϵ)
-    @info "BA N Outliers $n_outliers."
+    @debug "BA N Outliers $n_outliers."
 
     ignore_outliers = true
     sparsity2, g2! = _get_jacobian_sparsity(cache, residue!, ignore_outliers)

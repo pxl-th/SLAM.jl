@@ -64,7 +64,7 @@ end
 
 function prepare_frame!(m::MapManager)
     m.current_frame.kfid = m.current_keyframe_id
-    @info "[MM] Adding KF $(m.current_frame.kfid) to Map."
+    @debug "[MM] Adding KF $(m.current_frame.kfid) to Map."
 
     # Filter if there are too many keypoints.
     # if m.current_frame.nb_keypoints > m.params.max_nb_keypoints
@@ -387,4 +387,133 @@ function merge_mappoints(m::MapManager, prev_id, new_id)
         unlock(m.keyframe_lock)
         unlock(m.mappoint_lock)
     end
+end
+
+function optical_flow_matching!(
+    map_manager::MapManager, frame::Frame,
+    from_pyramid::ImageTracking.LKPyramid,
+    to_pyramid::ImageTracking.LKPyramid, stereo::Bool,
+)
+    window_size = map_manager.params.window_size
+    max_distance = map_manager.params.max_ktl_distance
+    pyramid_levels = map_manager.params.pyramid_levels
+
+    pyramid_levels_3d = 1
+    ids = Vector{Int64}(undef, frame.nb_keypoints)
+    pixels = Vector{Point2f}(undef, frame.nb_keypoints)
+
+    ids3d = Vector{Int64}(undef, frame.nb_3d_kpts)
+    pixels3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
+    displacements3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
+
+    i, i3d = 1, 1
+    scale = 1.0 / 2.0^pyramid_levels_3d
+    n_good = 0
+
+    keypoints = stereo ? get_keypoints(frame) : values(frame.keypoints)
+    for kp in keypoints
+        if !kp.is_3d
+            pixels[i] = kp.pixel
+            ids[i] = kp.id
+            i += 1
+            continue
+        end
+
+        mp = stereo ?
+            get_mappoint(map_manager, kp.id) :
+            map_manager.map_points[kp.id]
+        mp ≡ nothing &&
+            (remove_mappoint_obs!(map_manager, kp.id, frame.kfid); continue)
+
+        position = get_position(mp)
+        projection = stereo ?
+            project_world_to_right_image_distort(frame, position) :
+            project_world_to_image_distort(frame, position)
+
+        if stereo
+            if in_right_image(frame, projection)
+                ids3d[i3d] = kp.id
+                pixels3d[i3d] = kp.pixel
+                displacements3d[i3d] = scale .* (projection .- kp.pixel)
+                i3d += 1
+            else
+                remove_mappoint_obs!(map_manager, kp.id, frame.kfid)
+                continue
+            end
+        else
+            if in_image(frame, projection)
+                ids3d[i3d] = kp.id
+                pixels3d[i3d] = kp.pixel
+                displacements3d[i3d] = scale .* (projection .- kp.pixel)
+                i3d += 1
+            end
+        end
+    end
+
+    i3d -= 1
+    ids3d = @view(ids3d[1:i3d])
+    pixels3d = @view(pixels3d[1:i3d])
+    displacements3d = @view(displacements3d[1:i3d])
+
+    failed_3d = true
+    if !isempty(ids3d)
+        new_keypoints, status = fb_tracking!(
+            from_pyramid, to_pyramid, pixels3d;
+            displacement=displacements3d,
+            pyramid_levels=pyramid_levels_3d,
+            window_size, max_distance)
+
+        nb_good = 0
+        for j in 1:length(status)
+            if status[j]
+                if stereo
+                    succ = maybe_stereo_update!(frame, ids3d[j], new_keypoints[j])
+                    succ && (n_good += 1;)
+                else
+                    update_keypoint!(frame, ids3d[j], new_keypoints[j])
+                    nb_good += 1
+                end
+            else
+                # If failed → add to track with 2d keypoints w/o prior.
+                pixels[i] = pixels3d[j]
+                ids[i] = ids3d[j]
+                i += 1
+            end
+        end
+        @debug "[MM] 3D Points tracked $nb_good. Stereo $stereo."
+        failed_3d = nb_good < 0.33 * length(ids3d)
+    end
+
+    i -= 1
+    pixels = @view(pixels[1:i])
+    ids = @view(ids[1:i])
+
+    isempty(pixels) && return
+    new_keypoints, status = fb_tracking!(
+        from_pyramid, to_pyramid, pixels;
+        pyramid_levels, window_size, max_distance)
+
+    for j in 1:length(new_keypoints)
+        if stereo
+            status[j] && maybe_stereo_update!(frame, ids[j], new_keypoints[j]) &&
+                (n_good += 1;)
+        else
+            status[j] ?
+                update_keypoint!(frame, ids[j], new_keypoints[j]) :
+                remove_obs_from_current_frame!(map_manager, ids[j])
+        end
+    end
+end
+
+function maybe_stereo_update!(
+    frame::Frame, kpid, new_position::Point2f; epipolar_error::Float64 = 2.0,
+)
+    kp = get_keypoint(frame, kpid)
+    right_pixel = undistort_point(frame.right_camera, new_position)
+    abs(kp.undistorted_pixel[1] - right_pixel[1]) > epipolar_error &&
+        return false
+    # Make y-coordinate the same.
+    corrected = Point2f(kp.pixel[1], new_position[2])
+    update_stereo_keypoint!(frame, kpid, corrected)
+    true
 end

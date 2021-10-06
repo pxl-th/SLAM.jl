@@ -7,10 +7,9 @@ create_sysimage(
         :Images,
         :ImageDraw,
         :ImageFeatures,
-        :ImageTracking,
         :Rotations,
         :Manifolds,
-        :DataStructures,
+        :OrderedCollections,
         :GLMakie,
 
         :LeastSquaresOptim,
