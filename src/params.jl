@@ -74,6 +74,10 @@ Base.@kwdef mutable struct Params
     """
     max_projection_distance::Float64 = 2.0
     max_descriptor_distance::Float64 = 0.35
+    """
+    Whether to do map filtering to remove low-information KeyFrames.
+    """
+    map_filtering::Bool = false
 end
 
 function reset!(p::Params)

@@ -43,8 +43,7 @@ end
 function Estimator(map_manager::MapManager, params::Params)
     Estimator(
         map_manager, params, Frame[],
-        false, false, ReentrantLock(),
-    )
+        false, false, ReentrantLock())
 end
 
 function run!(estimator::Estimator)
@@ -59,7 +58,8 @@ function run!(estimator::Estimator)
             lock(estimator.map_manager.optimization_lock)
             try
                 local_bundle_adjustment!(estimator, new_kf)
-                map_filtering!(estimator, new_kf)
+                estimator.params.map_filtering &&
+                    map_filtering!(estimator, new_kf)
             catch e
                 showerror(stdout, e); println()
                 display(stacktrace(catch_backtrace())); println()
@@ -68,7 +68,7 @@ function run!(estimator::Estimator)
             end
         end
     end
-    @info "[ES] Exit required."
+    @debug "[ES] Exit required."
 end
 
 function add_new_kf!(estimator::Estimator, frame::Frame)
@@ -88,7 +88,7 @@ function get_new_kf!(estimator::Estimator)
         # TODO if more than 1 frame in queue, add them to ba anyway.
         estimator.new_kf_available = false
         kf = popfirst!(estimator.frame_queue)
-        @info "[ES] Popping queue $(length(estimator.frame_queue)): $(kf.kfid)."
+        @debug "[ES] Popping queue $(length(estimator.frame_queue)): $(kf.kfid)."
         kf
     end
 end
@@ -196,8 +196,8 @@ function _get_ba_parameters(
     n_observations = length(observations)
     n_poses, n_points = length(poses), length(map_points)
     point_shift = n_poses * 6
-    @info "[ES] BA Covisibility: $(length(covisibility_map)):"
-    @info "\t BA Poses: $n_poses | BA Points: $n_points | BA Obs: $n_observations"
+    @debug "[ES] BA Covisibility: $(length(covisibility_map)):"
+    @debug "\t BA Poses: $n_poses | BA Points: $n_points | BA Obs: $n_observations"
 
     θ = Vector{Float64}(undef, point_shift + n_points * 3)
     θconst = Vector{Bool}(undef, n_poses)
@@ -246,16 +246,7 @@ function _update_ba_parameters!(
     for (i, kfid) in enumerate(cache.poses_remap)
         p = (i - 1) * 6
         kf = get_keyframe(map_manager, kfid)
-        new_pose = @view(cache.θ[(p + 1):(p + 6)])
-
-        if cache.θconst[i]
-            old_pose = get_cw_ba(kf)
-            if !all(isapprox.(old_pose, new_pose))
-                error("Changed constant pose $(kf.id), $(kf.kfid): $new_pose vs $old_pose.")
-            end
-            continue
-        end
-        set_cw_ba!(kf, new_pose)
+        set_cw_ba!(kf, @view(cache.θ[(p + 1):(p + 6)]))
     end
 
     for i in 1:length(cache.observations)
@@ -276,8 +267,7 @@ function _update_ba_parameters!(
             mpid in cache.bad_keypoints && pop!(cache.bad_keypoints, mpid)
         else
             p = points_shift + (i - 1) * 3
-            new_position = @view(cache.θ[(p + 1):(p + 3)])
-            set_position!(mp, new_position)
+            set_position!(mp, @view(cache.θ[(p + 1):(p + 3)]))
         end
     end
 
@@ -328,7 +318,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     end
 
     t2 = time()
-    @info "[ES] BA Time: $(t2 - t1) seconds."
+    @debug "[ES] BA Time: $(t2 - t1) seconds."
 
     estimator.params.local_ba_on = false
 end
@@ -357,7 +347,7 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
             lock(estimator.map_manager.map_lock) do
                 remove_keyframe!(estimator.map_manager, kfid)
             end
-            @info "[ES] Removed KeyFrame $kfid."
+            @debug "[ES] Removed KeyFrame $kfid."
             n_removed += 1
             continue
         end
@@ -382,11 +372,11 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
             lock(estimator.map_manager.map_lock) do
                 remove_keyframe!(estimator.map_manager, kfid)
             end
-            @info "[ES] Removed KeyFrame $kfid."
+            @debug "[ES] Removed KeyFrame $kfid."
             n_removed += 1
         end
     end
-    @info "[ES] Removed $n_removed KeyFrames."
+    @debug "[ES] Removed $n_removed KeyFrames."
 end
 
 function reset!(estimator::Estimator)

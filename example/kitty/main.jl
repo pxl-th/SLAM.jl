@@ -5,50 +5,6 @@ using SLAM
 
 include("kitty.jl")
 
-function tr()
-    base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "00"
-    stereo = true
-
-    dataset = KittyDataset(base_dir, sequence; stereo)
-    println(dataset)
-
-    save_dir = joinpath("/home/pxl-th/projects", "2-kitty-$sequence")
-    frames_dir = joinpath(save_dir, "frames")
-    isdir(save_dir) || mkdir(save_dir)
-    isdir(frames_dir) || mkdir(frames_dir)
-    @info "Save directory: $save_dir"
-
-    mappoints_save_file = joinpath(save_dir, "mappoints.bson")
-    positions_save_file = joinpath(save_dir, "positions.bson")
-
-    fx, fy = dataset.K[1, 1], dataset.K[2, 2]
-    cx, cy = dataset.K[1:2, 3]
-    height, width = 376, 1241
-
-    camera = SLAM.Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
-    right_camera = SLAM.Camera(
-        fx, fy, cx, cy, 0, 0, 0, 0, height, width; Ti0=dataset.Ti0)
-
-    P1 = SLAM.to_4x4(camera.K) * SMatrix{4, 4, Float64, 16}(I)
-    P2 = SLAM.to_4x4(right_camera.K) * right_camera.Ti0
-
-    display(camera.K); println()
-    display(P1); println()
-    display(P2); println()
-    display(right_camera.Ti0); println()
-    display(right_camera.T0i); println()
-
-    left_pixel = SVector{2, Float64}(29.0, 286.0)
-    right_pixel = SVector{2, Float64}(29.0, 261.0778931519344)
-
-    left_point = SLAM.iterative_triangulation(
-        left_pixel[[2, 1]], right_pixel[[2, 1]], P1, P2)
-    left_point *= 1.0 / left_point[4]
-
-    @info left_point
-end
-
 function main(n_frames::Int)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
     sequence = "00"

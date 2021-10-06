@@ -29,11 +29,11 @@ function track!(fe::FrontEnd, image, time)
     lock(fe.map_manager.map_lock)
     try
         is_kf_required = track_mono!(fe, image, time)
-        @info "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
+        @debug "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
 
-        vimage = RGB{Float64}.(fe.current_image)
-        draw_keypoints!(vimage, fe.current_frame)
-        save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
+        # vimage = RGB{Float64}.(fe.current_image)
+        # draw_keypoints!(vimage, fe.current_frame)
+        # save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
 
         if is_kf_required
             create_keyframe!(fe.map_manager, image)
@@ -48,16 +48,17 @@ function track!(fe::FrontEnd, image, time)
     is_kf_required
 end
 
-function track_mono!(fe::FrontEnd, image, time)::Bool
+function track_mono!(fe::FrontEnd, image, image_time)::Bool
     preprocess!(fe, image)
     # If it's the first frame, then KeyFrame is always needed.
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
-    # @info "[FE] Old Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
-    set_wc!(fe.current_frame, fe.motion_model(fe.current_frame.wc, time))
-    # @info "[FE] New Pose $(fe.current_frame.id): $(get_wc_ba(fe.current_frame))"
+    set_wc!(fe.current_frame, fe.motion_model(fe.current_frame.wc, image_time))
 
+    t1 = time()
     klt_tracking!(fe)
+    t2 = time()
+    @debug "[FE] KLT Tracking ($(t2 - t1) sec)."
 
     if !fe.params.vision_initialized
         if fe.current_frame.nb_keypoints < 50
@@ -76,17 +77,21 @@ function track_mono!(fe::FrontEnd, image, time)::Bool
 
     # Epipolar filtering to remove outliers.
     # In case P3P fails this pose will be used.
-    pose_5pt = compute_pose_5pt!(
-        fe; min_parallax=5.0, #2.0 * fe.params.max_reprojection_error,
-        use_motion_model=true)
+    t1 = time()
+    pose_5pt = compute_pose_5pt!(fe; min_parallax=5.0, use_motion_model=true)
+    t2 = time()
+    @debug "[FE] 5PT Pose ($(t2 - t1) sec)."
 
     fe.map_manager.nb_keyframes > 2 && pose_5pt ≢ nothing &&
         set_cw!(fe.current_frame, pose_5pt)
 
+    t1 = time()
     compute_pose!(fe)
+    t2 = time()
+    @debug "[FE] Compute Pose ($(t2 - t1) sec)."
 
     # Update motion model from estimated pose.
-    update!(fe.motion_model, fe.current_frame.wc, time)
+    update!(fe.motion_model, fe.current_frame.wc, image_time)
     check_new_kf_required(fe)
 end
 
@@ -128,7 +133,6 @@ function compute_pose!(fe::FrontEnd)
     p3p_kpids = @view(p3p_kpids[1:i])
 
     if do_p3p
-        @info "[FE] P3P Ransac..."
         # P3P computes world → camera projection.
         res = p3p_ransac(
             p3p_3d_points, p3p_pixels, p3p_pdn_positions,
@@ -295,7 +299,7 @@ function check_ready_for_init!(fe::FrontEnd)
     avg_parallax = compute_parallax(
         fe, fe.current_frame.kfid;
         compensate_rotation=false, median_parallax=false)
-    @info "[FE] Initial parallax $avg_parallax vs $(fe.params.initial_parallax)."
+    @debug "[FE] Initial parallax $avg_parallax vs $(fe.params.initial_parallax)."
     avg_parallax ≤ fe.params.initial_parallax && return false
     pose = compute_pose_5pt!(
         fe; min_parallax=fe.params.initial_parallax, use_motion_model=false)
@@ -399,8 +403,6 @@ function compute_parallax(
 end
 
 function preprocess!(fe::FrontEnd, image)
-    # image = adjust_histogram(image, AdaptiveEqualization())
-
     fe.previous_image = fe.current_image
     fe.previous_pyramid = fe.current_pyramid
 
@@ -411,11 +413,8 @@ end
 
 function klt_tracking!(fe::FrontEnd)
     optical_flow_matching!(
-        fe.map_manager,
-        fe.current_frame, fe.previous_pyramid, fe.current_pyramid;
-        window_size=fe.params.window_size,
-        max_distance=fe.params.max_ktl_distance,
-        pyramid_levels=fe.params.pyramid_levels, stereo=false)
+        fe.map_manager, fe.current_frame,
+        fe.previous_pyramid, fe.current_pyramid, false)
 end
 
 function reset_frame!(fe::FrontEnd)
@@ -434,8 +433,7 @@ end
 function reset!(fe::FrontEnd)
     empty_pyr = ImageTracking.LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],
-        nothing, nothing, nothing, nothing, nothing,
-    )
+        nothing, nothing, nothing, nothing, nothing)
     fe.previous_pyramid = empty_pyr
     fe.current_pyramid = empty_pyr
 end

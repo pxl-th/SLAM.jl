@@ -22,7 +22,7 @@ end
 function Mapper(params::Params, map_manager::MapManager, frame::Frame)
     estimator = Estimator(map_manager, params)
     estimator_thread = Threads.@spawn run!(estimator)
-    @info "[MP] Launched estimator thread."
+    @debug "[MP] Launched estimator thread."
 
     Mapper(
         params, map_manager, estimator,
@@ -41,57 +41,62 @@ function run!(mapper::Mapper)
         new_keyframe = get_keyframe(mapper.map_manager, kf.id)
         new_keyframe ≡ nothing &&
             @error "[MP] Got invalid frame $(kf.id) from Map"
-        @info "[MP] Get $(kf.id) KF"
+        @debug "[MP] Get $(kf.id) KF"
 
         if mapper.params.stereo
             try
+                t1 = time()
                 right_pyramid = ImageTracking.LKPyramid(
                     kf.right_image, mapper.params.pyramid_levels;
                     σ=mapper.params.pyramid_σ)
-
                 optical_flow_matching!(
-                    mapper.map_manager,
-                    new_keyframe, kf.left_pyramid, right_pyramid;
-                    window_size=mapper.params.window_size,
-                    max_distance=mapper.params.max_ktl_distance,
-                    pyramid_levels=mapper.params.pyramid_levels, stereo=true)
-                @info "[MP] Stereo Keypoints: $(new_keyframe.nb_stereo_kpts)"
-
-                if new_keyframe.nb_stereo_kpts > 0
-                    lock(mapper.map_manager.map_lock)
-                    try
-                        triangulate_stereo!(
-                            mapper.map_manager, new_keyframe;
-                            max_error=mapper.params.max_reprojection_error)
-                    catch e
-                        showerror(stdout, e)
-                        display(stacktrace(catch_backtrace()))
-                    finally
-                        unlock(mapper.map_manager.map_lock)
-                    end
-                end
-
-                vimage = RGB{Float64}.(kf.right_image)
-                draw_keypoints!(vimage, new_keyframe; right=true)
-                save("/home/pxl-th/projects/slam-data/images/frame-$(new_keyframe.id)-right.png", vimage)
+                    mapper.map_manager, new_keyframe,
+                    kf.left_pyramid, right_pyramid, true)
+                t2 = time()
+                @debug "[MP] Stereo Matching ($(t2 - t1) sec): $(new_keyframe.nb_stereo_kpts) Keypoints"
             catch e
                 showerror(stdout, e)
                 display(stacktrace(catch_backtrace()))
             end
+
+            if new_keyframe.nb_stereo_kpts > 0
+                lock(mapper.map_manager.map_lock)
+
+                t1 = time()
+                try
+                    triangulate_stereo!(
+                        mapper.map_manager, new_keyframe,
+                        mapper.params.max_reprojection_error)
+                catch e
+                    showerror(stdout, e)
+                    display(stacktrace(catch_backtrace()))
+                finally
+                    unlock(mapper.map_manager.map_lock)
+                end
+                t2 = time()
+                @debug "[MP] Stereo Triangulation ($(t2 - t1) sec)."
+            end
+
+            # vimage = RGB{Float64}.(kf.right_image)
+            # draw_keypoints!(vimage, new_keyframe; right=true)
+            # save("/home/pxl-th/projects/slam-data/images/frame-$(new_keyframe.id)-right.png", vimage)
         end
 
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
             lock(mapper.map_manager.map_lock)
+            t1 = time()
             try
                 triangulate_temporal!(
-                    mapper.map_manager, new_keyframe;
-                    max_error=mapper.params.max_reprojection_error)
+                    mapper.map_manager, new_keyframe,
+                    mapper.params.max_reprojection_error)
             catch e
                 showerror(stdout, e)
                 display(stacktrace(catch_backtrace()))
             finally
                 unlock(mapper.map_manager.map_lock)
             end
+            t2 = time()
+            @debug "[MP] Temporal Triangulation ($(t2 - t1) sec)."
         end
 
         # Check if reset is required.
@@ -108,28 +113,32 @@ function run!(mapper::Mapper)
                 continue
             end
         end
-        # Update the map points and the covisibility graph between KeyFrames.
+
+        t1 = time()
         update_frame_covisibility!(mapper.map_manager, new_keyframe)
+        t2 = time()
+        @debug "[MP] Covisibility update ($(t2 - t1) sec)."
 
         if mapper.params.do_local_matching && kf.id > 0
+            t1 = time()
             try
                 match_local_map!(mapper, new_keyframe)
             catch e
                 showerror(stdout, e)
                 display(stacktrace(catch_backtrace()))
             end
+            t2 = time()
+            @debug "[MP] Local Matching ($(t2 - t1) sec)."
         end
 
-        # Send new KF to estimator for bundle adjustment.
-        @debug "[MP] Sending new Keyframe to Estimator."
         add_new_kf!(mapper.estimator, new_keyframe)
     end
     mapper.estimator.exit_required = true
-    @info "[MP] Exit required."
+    @debug "[MP] Exit required."
     wait(mapper.estimator_thread)
 end
 
-function triangulate_stereo!(map_manager::MapManager, frame::Frame; max_error)
+function triangulate_stereo!(map_manager::MapManager, frame::Frame, max_error)
     stereo_keypoints = get_stereo_keypoints(frame)
     if isempty(stereo_keypoints)
         @warn "[MP] No stereo keypoints to triangulate."
@@ -168,17 +177,17 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame; max_error)
         update_mappoint!(map_manager, kp.id, wpt)
         n_good += 1
     end
-    @info "[MP] Stereo triangulation: $n_good Keypoints | $(frame.nb_3d_kpts)"
+    @debug "[MP] Stereo triangulation: $n_good Keypoints | $(frame.nb_3d_kpts)"
 end
 
-function triangulate_temporal!(map_manager::MapManager, frame::Frame; max_error)
+function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
     keypoints = get_2d_keypoints(frame)
     if isempty(keypoints)
         @warn "[MP] No 2D keypoints to triangulate."
         return
     end
 
-    @info "[MP] Triangulating $(length(keypoints)) Keypoints..."
+    @debug "[MP] Triangulating $(length(keypoints)) Keypoints..."
     K = to_4x4(frame.camera.K)
     # P1 - previous Keyframe, P2 - this `frame`.
     P1 = K * SMatrix{4, 4, Float64, 16}(I)
@@ -248,7 +257,7 @@ function triangulate_temporal!(map_manager::MapManager, frame::Frame; max_error)
         update_mappoint!(map_manager, kp.id, wpt)
         good += 1
     end
-    @info "[MP] Temporal triangulation: $good good KeyPoints."
+    @debug "[MP] Temporal triangulation: $good good KeyPoints."
 end
 
 """
@@ -458,7 +467,7 @@ function get_new_kf!(mapper::Mapper)
         end
 
         keyframe = popfirst!(mapper.keyframe_queue)
-        @info "[MP] Popping queue $(length(mapper.keyframe_queue))"
+        @debug "[MP] Popping queue $(length(mapper.keyframe_queue))"
         mapper.new_kf_available = !isempty(mapper.keyframe_queue)
         true, keyframe
     end

@@ -64,7 +64,7 @@ end
 
 function prepare_frame!(m::MapManager)
     m.current_frame.kfid = m.current_keyframe_id
-    @info "[MM] Adding KF $(m.current_frame.kfid) to Map."
+    @debug "[MM] Adding KF $(m.current_frame.kfid) to Map."
 
     # Filter if there are too many keypoints.
     # if m.current_frame.nb_keypoints > m.params.max_nb_keypoints
@@ -392,10 +392,13 @@ end
 function optical_flow_matching!(
     map_manager::MapManager, frame::Frame,
     from_pyramid::ImageTracking.LKPyramid,
-    to_pyramid::ImageTracking.LKPyramid;
-    window_size::Int64, max_distance::Float64, pyramid_levels::Int64,
-    stereo::Bool, pyramid_levels_3d = 1,
+    to_pyramid::ImageTracking.LKPyramid, stereo::Bool,
 )
+    window_size = map_manager.params.window_size
+    max_distance = map_manager.params.max_ktl_distance
+    pyramid_levels = map_manager.params.pyramid_levels
+
+    pyramid_levels_3d = 1
     ids = Vector{Int64}(undef, frame.nb_keypoints)
     pixels = Vector{Point2f}(undef, frame.nb_keypoints)
 
@@ -477,7 +480,7 @@ function optical_flow_matching!(
                 i += 1
             end
         end
-        @info "[MM] 3D Points tracked $nb_good. Stereo $stereo."
+        @debug "[MM] 3D Points tracked $nb_good. Stereo $stereo."
         failed_3d = nb_good < 0.33 * length(ids3d)
     end
 

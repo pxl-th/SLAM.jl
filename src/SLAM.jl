@@ -126,7 +126,7 @@ function SlamManager(
 
     mapper = Mapper(params, map_manager, frame)
     mapper_thread = Threads.@spawn run!(mapper)
-    @info "[SM] Launched mapper thread."
+    @debug "[SM] Launched mapper thread."
 
     SlamManager(
         params, image_queue, right_image_queue,
@@ -220,7 +220,7 @@ function run!(sm::SlamManager)
 
     sm.mapper.exit_required = true
     wait(sm.mapper_thread)
-    @info "[SM] Exit required."
+    @debug "[SM] Exit required."
 end
 
 function reset!(sm::SlamManager)
@@ -256,7 +256,8 @@ precompile(compute_pose!, (FrontEnd,))
 precompile(compute_pose_5pt!, (FrontEnd,))
 
 precompile(run!, (Mapper,))
-precompile(triangulate_temporal!, (Mapper, Frame,))
+precompile(triangulate_stereo!, (MapManager, Frame, Float64))
+precompile(triangulate_temporal!, (MapManager, Frame, Float64))
 
 precompile(run!, (Estimator,))
 precompile(local_bundle_adjustment!, (Estimator, Frame,))
