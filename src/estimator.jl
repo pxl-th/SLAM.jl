@@ -226,12 +226,6 @@ function _get_ba_parameters(
             θ[(p + 1):(p + 3)] .= observation.point
         end
     end
-    if !all(processed_poses)
-        error("Not all poses were processed: $(sum(processed_poses)) vs $n_poses.")
-    end
-    if !all(processed_points)
-        error("Not all points were processed: $(sum(processed_points)) vs $n_points.")
-    end
 
     LocalBACache(
         observations, bad_keypoints, θ, θconst, pixels,

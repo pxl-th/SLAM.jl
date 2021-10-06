@@ -201,14 +201,12 @@ end
 function compute_pose_5pt!(
     fe::FrontEnd; min_parallax::Real, use_motion_model::Bool,
 )::Union{Nothing, SMatrix{4, 4, Float64}}
-    # Ensure there are enough keypoints for the essential matrix computation.
     if fe.current_frame.nb_keypoints < 8
-        @debug "[Front-End] Not enough keypoints for initialization: " *
+        @debug "[FE] Not enough keypoints for initialization: " *
             "$(fe.current_frame.nb_keypoints)"
         return nothing
     end
 
-    # Setup Essential matrix computation.
     previous_keyframe = get(
         fe.map_manager.frames_map, fe.current_frame.kfid, nothing)
     previous_keyframe ≡ nothing && return nothing
@@ -223,7 +221,7 @@ function compute_pose_5pt!(
     i = 1
 
     # Get all Keypoint's positions and compute rotation-compensated parallax.
-    for keypoint in values(fe.current_frame.keypoints)
+    @inbounds for keypoint in values(fe.current_frame.keypoints)
         pkf_keypoint = get(previous_keyframe.keypoints, keypoint.id, nothing)
         pkf_keypoint ≡ nothing && continue
 
@@ -240,14 +238,14 @@ function compute_pose_5pt!(
         n_parallax += 1
     end
     if n_parallax < 8
-        @warn "[Front-End] Not enough keypoints in previous KF " *
+        @warn "[FE] Not enough keypoints in previous KF " *
             "to compute 5pt Essential Matrix."
         return nothing
     end
 
     avg_parallax /= n_parallax
     if avg_parallax < min_parallax
-        @warn "[Front-End] Not enough parallax ($avg_parallax) " *
+        @warn "[FE] Not enough parallax ($avg_parallax) " *
             "to compute 5pt Essential Matrix."
         return nothing
     end
@@ -263,12 +261,11 @@ function compute_pose_5pt!(
         fe.current_frame.camera.K, fe.current_frame.camera.K;
         max_repr_error=fe.params.max_reprojection_error)
     if n_inliers < 5
-        @warn "[Front-End] Not enough inliers ($n_inliers) for the " *
+        @warn "[FE] Not enough inliers ($n_inliers) for the " *
             "5pt Essential Matrix."
         return nothing
     end
 
-    # Remove outliers from the current frame.
     if n_inliers != n_parallax
         for (i, inlier) in enumerate(inliers)
             inlier || remove_obs_from_current_frame!(fe.map_manager, kp_ids[i])

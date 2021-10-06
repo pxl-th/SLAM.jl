@@ -61,20 +61,19 @@ function run!(mapper::Mapper)
 
             if new_keyframe.nb_stereo_kpts > 0
                 lock(mapper.map_manager.map_lock)
-
-                t1 = time()
                 try
+                    t1 = time()
                     triangulate_stereo!(
                         mapper.map_manager, new_keyframe,
                         mapper.params.max_reprojection_error)
+                    t2 = time()
+                    @debug "[MP] Stereo Triangulation ($(t2 - t1) sec)."
                 catch e
                     showerror(stdout, e)
                     display(stacktrace(catch_backtrace()))
                 finally
                     unlock(mapper.map_manager.map_lock)
                 end
-                t2 = time()
-                @debug "[MP] Stereo Triangulation ($(t2 - t1) sec)."
             end
 
             # vimage = RGB{Float64}.(kf.right_image)
@@ -84,19 +83,19 @@ function run!(mapper::Mapper)
 
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0
             lock(mapper.map_manager.map_lock)
-            t1 = time()
             try
+                t1 = time()
                 triangulate_temporal!(
                     mapper.map_manager, new_keyframe,
                     mapper.params.max_reprojection_error)
+                t2 = time()
+                @debug "[MP] Temporal Triangulation ($(t2 - t1) sec)."
             catch e
                 showerror(stdout, e)
                 display(stacktrace(catch_backtrace()))
             finally
                 unlock(mapper.map_manager.map_lock)
             end
-            t2 = time()
-            @debug "[MP] Temporal Triangulation ($(t2 - t1) sec)."
         end
 
         # Check if reset is required.
@@ -156,7 +155,7 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame, max_error)
             (remove_mappoint_obs!(map_manager, kp.id, frame.kfid); continue)
         mp.is_3d && continue
 
-        left_point = iterative_triangulation(
+        left_point = triangulate_point(
             kp.undistorted_pixel[[2, 1]], kp.right_undistorted_pixel[[2, 1]],
             P1, P2)
         left_point *= 1.0 / left_point[4]
@@ -236,7 +235,7 @@ function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
         parallax = norm(
             obup .- project(frame.camera, rel_pose[1:3, 1:3] * kp.position))
 
-        left_point = iterative_triangulation(obup[[2, 1]], kpup[[2, 1]], P1, P2)
+        left_point = triangulate_point(obup[[2, 1]], kpup[[2, 1]], P1, P2)
         left_point *= 1.0 / left_point[4]
         left_point[3] < 0.1 && parallax > 20.0 && (remove_mappoint_obs!(
             map_manager, observer_kp.id, frame.kfid); continue)
