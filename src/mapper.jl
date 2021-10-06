@@ -150,8 +150,12 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame; max_error)
         left_point = iterative_triangulation(
             kp.undistorted_pixel[[2, 1]], kp.right_undistorted_pixel[[2, 1]],
             P1, P2)
-        left_point *= -1.0 / left_point[4] # TODO why -1.0 and not 1.0????????
-        left_point[3] < 0.1 && (remove_stereo_keypoint!(frame, kp.id); continue)
+        left_point *= 1.0 / left_point[4]
+        if left_point[3] < 0.1
+            @warn "Left pixel $(kp.undistorted_pixel) | Right pixel $(kp.right_undistorted_pixel) | Left point $left_point" maxlog=10
+            remove_stereo_keypoint!(frame, kp.id)
+            continue
+        end
 
         right_point = frame.right_camera.Ti0 * left_point
         right_point[3] < 0.1 && (remove_stereo_keypoint!(frame, kp.id); continue)
