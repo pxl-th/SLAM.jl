@@ -67,6 +67,7 @@ Base.@kwdef mutable struct Params
     Indicates whether system is performing Local Bundle-Adjustment now.
     """
     local_ba_on::Bool = false
+    do_local_matching::Bool = false
     """
     Maximum distance between projected and target pixels.
     Used during matching to local map.

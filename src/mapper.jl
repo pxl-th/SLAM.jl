@@ -111,14 +111,14 @@ function run!(mapper::Mapper)
         # Update the map points and the covisibility graph between KeyFrames.
         update_frame_covisibility!(mapper.map_manager, new_keyframe)
 
-        # if kf.id > 0
-        #     try
-        #         match_local_map!(mapper, new_keyframe)
-        #     catch e
-        #         showerror(stdout, e)
-        #         display(stacktrace(catch_backtrace()))
-        #     end
-        # end
+        if mapper.params.do_local_matching && kf.id > 0
+            try
+                match_local_map!(mapper, new_keyframe)
+            catch e
+                showerror(stdout, e)
+                display(stacktrace(catch_backtrace()))
+            end
+        end
 
         # Send new KF to estimator for bundle adjustment.
         @debug "[MP] Sending new Keyframe to Estimator."
@@ -151,11 +151,7 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame; max_error)
             kp.undistorted_pixel[[2, 1]], kp.right_undistorted_pixel[[2, 1]],
             P1, P2)
         left_point *= 1.0 / left_point[4]
-        if left_point[3] < 0.1
-            @warn "Left pixel $(kp.undistorted_pixel) | Right pixel $(kp.right_undistorted_pixel) | Left point $left_point" maxlog=10
-            remove_stereo_keypoint!(frame, kp.id)
-            continue
-        end
+        left_point[3] < 0.1 && (remove_stereo_keypoint!(frame, kp.id); continue)
 
         right_point = frame.right_camera.Ti0 * left_point
         right_point[3] < 0.1 && (remove_stereo_keypoint!(frame, kp.id); continue)
@@ -211,7 +207,7 @@ function triangulate_temporal!(map_manager::MapManager, frame::Frame; max_error)
         observer_kf = get_keyframe(map_manager, kfid)
         if observer_kf ≡ nothing
             @error "[MP] Missing observer for triangulation."
-            continue # TODO should this be possible?
+            continue
         end
 
         # Compute relative motion between new KF & observer KF.
@@ -400,10 +396,8 @@ function find_best_match(
         distance = norm(projection .- kp.pixel)
         distance > max_projection_distance && continue
 
-        # TODO should surrounding kp be triangulated?
         mp = get_mappoint(map_manager, kp.id)
         if mp ≡ nothing
-            # TODO should remove keypoint as well?
             remove_mappoint_obs!(map_manager, kp.id, frame.kfid)
             continue
         end
