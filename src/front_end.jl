@@ -1,3 +1,25 @@
+"""
+Front-End component which is responsible for tracking keypoints
+and computing poses for the Frames.
+It also decides when the system needs a new Keyframe added to its map.
+
+# Parameters:
+
+- `current_frame::Frame`: Current frame that is being processed.
+    This is a shared Frame between FrontEnd, MapManager, Estimator
+    and SlamManager.
+- `motion_model::MotionModel`: Motion model that is used to predict
+    pose for the Frame before the actual pose for it was computed.
+- `map_manager::MapManager`: Map manager that is responsible for the
+    creation of new Keyframes in the map.
+- `params::Params`: Parameters of the system.
+- `current_image::Matrix{Gray{Float64}}`: Current image that is processed.
+- `previous_image::Matrix{Gray{Float64}}`: Previous processed image.
+- `current_pyramid::ImageTracking.LKPyramid`: Pre-computed pyramid
+    that is used for optical flow tracking for the `current_image`.
+- `previous_pyramid::ImageTracking.LKPyramid`: Pre-computed pyramid
+    that is used for optical flow tracking for the `previous_image`.
+"""
 mutable struct FrontEnd
     current_frame::Frame
     motion_model::MotionModel
@@ -9,8 +31,6 @@ mutable struct FrontEnd
 
     current_pyramid::ImageTracking.LKPyramid
     previous_pyramid::ImageTracking.LKPyramid
-
-    p3p_required::Bool
 end
 
 function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
@@ -23,6 +43,15 @@ function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
         empty_pyr, empty_pyr, false)
 end
 
+"""
+Given an image and time at which it was taken, track keypoints in it.
+After tracking, decide if the system needs a new Keyframe added to the map.
+If it is the first image to be tracked, then Keyframe is always needed.
+
+# Returns:
+
+`true` if the system needs a new Keyframe, otherwise `false`.
+"""
 function track!(fe::FrontEnd, image, time)
     is_kf_required = false
 
@@ -35,10 +64,7 @@ function track!(fe::FrontEnd, image, time)
         # draw_keypoints!(vimage, fe.current_frame)
         # save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
 
-        if is_kf_required
-            create_keyframe!(fe.map_manager, image)
-        end
-        is_kf_required
+        is_kf_required && create_keyframe!(fe.map_manager, image)
     catch e
         showerror(stdout, e)
         display(stacktrace(catch_backtrace()))
@@ -97,15 +123,18 @@ end
 
 """
 Compute pose of a current Frame using P3P Ransac algorithm.
+Pose is computed from the triangulated Keypoints (MapPoints) that are visible
+in this frame.
+
+# Returns:
+
+`true` if the pose was successfully computed, otherwise `false`.
 """
 function compute_pose!(fe::FrontEnd)
     if fe.current_frame.nb_3d_kpts < 5
         @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts)."
         return false
     end
-
-    do_p3p = true
-    # do_p3p = fe.p3p_required && fe.params.do_p3p
 
     p3p_pixels = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
     p3p_pdn_positions = Vector{Point3f}(undef, fe.current_frame.nb_3d_kpts)
@@ -132,59 +161,53 @@ function compute_pose!(fe::FrontEnd)
     p3p_3d_points = @view(p3p_3d_points[1:i])
     p3p_kpids = @view(p3p_kpids[1:i])
 
-    if do_p3p
-        # P3P computes world → camera projection.
-        res = p3p_ransac(
-            p3p_3d_points, p3p_pixels, p3p_pdn_positions,
-            fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
-        )
-        if res ≡ nothing
-            @warn "[FE] P3P Ransac returned Nothing."
-            fe |> reset_frame!
-            return false
-        end
-
-        n_inliers, model = res
-        if n_inliers < 5 || model ≡ nothing
-            @warn "[FE] P3P too few inliers - resetting!"
-            fe |> reset_frame!
-            return false
-        end
-
-        KP, inliers, error = model
-        set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP))
-        # Remove outliers after P3P.
-        for (kpid, inlier) in zip(p3p_kpids, inliers)
-            inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
-        end
-
-        # Prepare data for BA refinement.
-        p3p_3d_points = @view(p3p_3d_points[inliers])
-        p3p_kpids = @view(p3p_kpids[inliers])
-
-        c = 1
-        for i in 1:length(p3p_pixels)
-            inliers[i] || continue
-            p = p3p_pixels[i]
-            p3p_pixels[c] = Point2f(p[2], p[1])
-            c += 1
-        end
-        p3p_pixels = @view(p3p_pixels[1:n_inliers])
-    else
-        for i in 1:length(p3p_pixels)
-            p = p3p_pixels[i]
-            p3p_pixels[i] = Point2f(p[2], p[1])
-        end
+    # P3P computes world → camera projection.
+    res = p3p_ransac(
+        p3p_3d_points, p3p_pixels, p3p_pdn_positions,
+        fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
+    )
+    if res ≡ nothing
+        @warn "[FE] P3P Ransac returned Nothing."
+        fe |> reset_frame!
+        return false
     end
 
+    n_inliers, model = res
+    if n_inliers < 5 || model ≡ nothing
+        @warn "[FE] P3P too few inliers - resetting!"
+        fe |> reset_frame!
+        return false
+    end
+
+    KP, inliers, error = model
+    set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP))
+    # Remove outliers after P3P.
+    for (kpid, inlier) in zip(p3p_kpids, inliers)
+        inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
+    end
+
+    # Prepare data for BA refinement.
+    p3p_3d_points = @view(p3p_3d_points[inliers])
+    p3p_kpids = @view(p3p_kpids[inliers])
+
+    c = 1
+    for i in 1:length(p3p_pixels)
+        inliers[i] || continue
+        p = p3p_pixels[i]
+        p3p_pixels[c] = Point2f(p[2], p[1])
+        c += 1
+    end
+    p3p_pixels = @view(p3p_pixels[1:n_inliers])
+
+    # Refinement.
     new_T, init_error, res_error, outliers, n_outliers = pnp_bundle_adjustment(
         fe.current_frame.camera, fe.current_frame.cw,
         p3p_pixels, p3p_3d_points;
-        iterations=10, show_trace=false, repr_ϵ=fe.params.max_reprojection_error,
+        iterations=10, show_trace=false,
+        repr_ϵ=fe.params.max_reprojection_error,
     )
     if length(p3p_3d_points) - n_outliers < 5 || res_error > init_error
         @warn "[FE] P3P BA too few inliers - resetting!"
-        fe.p3p_required = true
         fe |> reset_frame!
         return false
     end
@@ -194,7 +217,6 @@ function compute_pose!(fe::FrontEnd)
     end
 
     set_cw!(fe.current_frame, new_T)
-    fe.p3p_required = false
     true
 end
 

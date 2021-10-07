@@ -288,11 +288,12 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     estimator.params.local_ba_on = true
     covisibility_map = get_covisible_map(new_frame)
     covisibility_map[new_frame.kfid] = new_frame.nb_3d_kpts
+
     # Get up to 5 latest KeyFrames.
-    # co_kfids = sort!(collect(keys(covisibility_map)); rev=true)
-    # co_kfids = co_kfids[1:min(5, length(co_kfids))]
-    # covisibility_map = Dict{Int64, Int64}(
-    #     kfid => covisibility_map[kfid] for kfid in co_kfids)
+    co_kfids = sort!(collect(keys(covisibility_map)); rev=true)
+    co_kfids = co_kfids[1:min(5, length(co_kfids))]
+    covisibility_map = OrderedDict{Int64, Int64}(
+        kfid => covisibility_map[kfid] for kfid in co_kfids)
 
     t1 = time()
 
