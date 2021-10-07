@@ -13,7 +13,7 @@ function main(n_frames::Int)
     dataset = KittyDataset(base_dir, sequence; stereo)
     println(dataset)
 
-    save_dir = joinpath("/home/pxl-th/projects", "2-kitty-$sequence")
+    save_dir = joinpath("/home/pxl-th/projects", "kitty-$sequence")
     frames_dir = joinpath(save_dir, "frames")
     isdir(save_dir) || mkdir(save_dir)
     isdir(frames_dir) || mkdir(frames_dir)
@@ -96,11 +96,11 @@ function main(n_frames::Int)
         for m in values(map_manager.map_points)
         if m.is_3d]
 
-    # @save mappoints_save_file slam_mappoints
-    # @save positions_save_file slam_positions
+    @save mappoints_save_file slam_mappoints
+    @save positions_save_file slam_positions
 
-    # @load mappoints_save_file slam_mappoints
-    # @load positions_save_file slam_positions
+    @load mappoints_save_file slam_mappoints
+    @load positions_save_file slam_positions
 
     visualizer = Visualizer((height, width))
     markersize = 0.07
