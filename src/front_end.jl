@@ -1,7 +1,7 @@
 """
-Front-End component which is responsible for tracking keypoints
+Front-End is responsible for tracking keypoints
 and computing poses for the Frames.
-It also decides when the system needs a new Keyframe added to its map.
+It also decides when the system needs a new Keyframe in the map.
 
 # Parameters:
 
@@ -40,10 +40,14 @@ function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
     FrontEnd(
         frame, MotionModel(), map_manager, params,
         Matrix{Gray{Float64}}(undef, 0, 0), Matrix{Gray{Float64}}(undef, 0, 0),
-        empty_pyr, empty_pyr, false)
+        empty_pyr, empty_pyr)
 end
 
 """
+```julia
+track!(fe::FrontEnd, image, time)
+```
+
 Given an image and time at which it was taken, track keypoints in it.
 After tracking, decide if the system needs a new Keyframe added to the map.
 If it is the first image to be tracked, then Keyframe is always needed.
@@ -112,7 +116,7 @@ function track_mono!(fe::FrontEnd, image, image_time)::Bool
         set_cw!(fe.current_frame, pose_5pt)
 
     t1 = time()
-    compute_pose!(fe)
+    succ = compute_pose!(fe)
     t2 = time()
     @debug "[FE] Compute Pose ($(t2 - t1) sec)."
 
@@ -122,13 +126,18 @@ function track_mono!(fe::FrontEnd, image, image_time)::Bool
 end
 
 """
+```julia
+compute_pose!(fe::FrontEnd)
+```
+
 Compute pose of a current Frame using P3P Ransac algorithm.
 Pose is computed from the triangulated Keypoints (MapPoints) that are visible
 in this frame.
 
 # Returns:
 
-`true` if the pose was successfully computed, otherwise `false`.
+`true` if the pose was successfully computed and applied to current Frame,
+otherwise `false`.
 """
 function compute_pose!(fe::FrontEnd)
     if fe.current_frame.nb_3d_kpts < 5
@@ -147,7 +156,7 @@ function compute_pose!(fe::FrontEnd)
         mp = get(fe.map_manager.map_points, kp.id, nothing)
         mp ≡ nothing && continue
 
-        do_p3p && (p3p_pdn_positions[i] = normalize(kp.position);)
+        p3p_pdn_positions[i] = normalize(kp.position)
         # Convert pixel to `(x, y)` format, expected by P3P.
         p3p_pixels[i] = kp.undistorted_pixel[[2, 1]]
         p3p_3d_points[i] = mp.position
@@ -156,7 +165,7 @@ function compute_pose!(fe::FrontEnd)
     end
 
     i -= 1
-    do_p3p && (p3p_pdn_positions = @view(p3p_pdn_positions[1:i]);)
+    p3p_pdn_positions = @view(p3p_pdn_positions[1:i])
     p3p_pixels = @view(p3p_pixels[1:i])
     p3p_3d_points = @view(p3p_3d_points[1:i])
     p3p_kpids = @view(p3p_kpids[1:i])
@@ -220,9 +229,31 @@ function compute_pose!(fe::FrontEnd)
     true
 end
 
-function compute_pose_5pt!(
-    fe::FrontEnd; min_parallax::Real, use_motion_model::Bool,
-)::Union{Nothing, SMatrix{4, 4, Float64}}
+"""
+```julia
+compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
+```
+
+Copmute pose for pixel correspondences using 5-point algorithm
+to recover essential matrix, then pose from it.
+
+# Arguments:
+
+- `min_parallax`: Minimum parallax required between pixels in the current Frame
+    and previous Keyframe to compute pose.
+    Note, that parallax is rotation-compensated, meaning a rotation from
+    current to previous frame is computed and applied to every pixel.
+- `use_motion_model`: If `true`, then use constant-velocity motion model
+    to predict next pose from previous frame.
+    Otherwise, the computed pose will be "local".
+
+# Returns:
+
+If successfull, 4x4 pose matrix, that transforms points
+from previous Keyframe to current Frame.
+Otherwise `nothing`.
+"""
+function compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
     if fe.current_frame.nb_keypoints < 8
         @debug "[FE] Not enough keypoints for initialization: " *
             "$(fe.current_frame.nb_keypoints)"
@@ -308,6 +339,10 @@ function compute_pose_5pt!(
 end
 
 """
+```julia
+check_ready_for_init!(fe::FrontEnd)
+```
+
 Check if there is enough average rotation compensated parallax
 between current Frame and previous KeyFrame.
 
@@ -328,9 +363,13 @@ function check_ready_for_init!(fe::FrontEnd)
 end
 
 """
+```julia
+check_new_kf_required(fe::FrontEnd)
+```
+
 Check if we need to insert a new KeyFrame into the Map.
 """
-function check_new_kf_required(fe::FrontEnd)::Bool
+function check_new_kf_required(fe::FrontEnd)
     prev_kf = get(fe.map_manager.frames_map, fe.current_frame.kfid, nothing)
     prev_kf ≡ nothing && return false
 
@@ -365,6 +404,13 @@ function check_new_kf_required(fe::FrontEnd)::Bool
 end
 
 """
+```julia
+compute_parallax(
+    fe::FrontEnd, current_frame_id;
+    compensate_rotation = true, only_2d = true, median_parallax = true,
+)
+```
+
 Compute parallax in pixels between current Frame
 and the provided `current_frame_id` Frame.
 
@@ -378,9 +424,8 @@ and the provided `current_frame_id` Frame.
     Instead of the average, compute median parallax. Default is `true`.
 """
 function compute_parallax(
-    fe::FrontEnd, current_frame_id::Int;
-    compensate_rotation::Bool = true,
-    only_2d::Bool = true, median_parallax::Bool = true,
+    fe::FrontEnd, current_frame_id;
+    compensate_rotation = true, only_2d = true, median_parallax = true,
 )
     frame = get(fe.map_manager.frames_map, current_frame_id, nothing)
     if frame ≡ nothing
@@ -430,12 +475,26 @@ function preprocess!(fe::FrontEnd, image)
     fe.current_image = image
 end
 
+"""
+```julia
+klt_tracking!(fe::FrontEnd)
+```
+
+Track keypoints from previous frame to current frame.
+"""
 function klt_tracking!(fe::FrontEnd)
     optical_flow_matching!(
         fe.map_manager, fe.current_frame,
         fe.previous_pyramid, fe.current_pyramid, false)
 end
 
+"""
+```julia
+reset_frame!(fe::FrontEnd)
+```
+
+Reset current Frame in Front-End.
+"""
 function reset_frame!(fe::FrontEnd)
     for kpid in keys(fe.current_frame.keypoints)
         remove_obs_from_current_frame!(fe.map_manager, kpid)
@@ -449,6 +508,13 @@ function reset_frame!(fe::FrontEnd)
     fe.current_frame.nb_occupied_cells = 0
 end
 
+"""
+```julia
+reset!(fe::FrontEnd)
+```
+
+Reset Front-End.
+"""
 function reset!(fe::FrontEnd)
     empty_pyr = ImageTracking.LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],

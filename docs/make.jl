@@ -8,7 +8,13 @@ makedocs(
     modules=[SLAM],
     pages=[
         "Home" => "index.md",
-        "API Reference" => ["api.md"]
+        "API Reference" => [
+            "Slam Manager" => "api/slam-manager.md",
+            "Front-End" => "api/front-end.md",
+            "Estimator" => "api/estimator.md",
+            "Map Manager" => "api/map-manager.md",
+            "Parameters" => "api/params.md",
+        ]
     ],
     format=Documenter.HTML(prettyurls=get(ENV, "CI", nothing) == "true"),
 )

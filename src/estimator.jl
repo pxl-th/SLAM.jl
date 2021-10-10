@@ -29,6 +29,30 @@ struct LocalBACache
     points_remap::Vector{Int64} # order id → mpid
 end
 
+function LocalBACache(
+    observations, bad_keypoints, θ, θconst, pixels,
+    poses_ids, points_ids, poses_remap, points_remap,
+)
+    outliers = Vector{Bool}(undef, length(observations))
+    LocalBACache(
+        observations, outliers, bad_keypoints, θ, θconst, pixels,
+        poses_ids, points_ids, poses_remap, points_remap)
+end
+
+"""
+Estimator is responsible for performing Bundle-Adjustment procedure
+and map filtering that removes low-information Keyframes from the map.
+
+# Arguments:
+
+- `map_manager::MapManager`: Map manager with all the map information.
+- `params::Params`: Parameters of the system.
+- `frame_queue::Vector{Frame}`: Queue of the Frames to process.
+- `new_kf_available::Bool`: Whether or not new Keyframe in the queue
+    is available.
+- `exit_required::Bool`: Whether the estimator should end its work and exit.
+- `queue_lock:ReentrantLock`: Lock for the queue.
+"""
 mutable struct Estimator
     map_manager::MapManager
     params::Params
@@ -46,6 +70,13 @@ function Estimator(map_manager::MapManager, params::Params)
         false, false, ReentrantLock())
 end
 
+"""
+```julia
+run!(estimator::Estimator)
+```
+
+Main routine that starts Estimator.
+"""
 function run!(estimator::Estimator)
     while !estimator.exit_required
         new_kf = get_new_kf!(estimator)
@@ -71,6 +102,13 @@ function run!(estimator::Estimator)
     @debug "[ES] Exit required."
 end
 
+"""
+```julia
+add_new_kf!(estimator::Estimator, frame::Frame)
+```
+
+Add `frame` to the Estimator queue to be processed.
+"""
 function add_new_kf!(estimator::Estimator, frame::Frame)
     lock(estimator.queue_lock) do
         push!(estimator.frame_queue, frame)
@@ -78,6 +116,13 @@ function add_new_kf!(estimator::Estimator, frame::Frame)
     end
 end
 
+"""
+```julia
+get_new_kf!(estimator::Estimator)
+```
+
+Get `frame` from the queue if it is available.
+"""
 function get_new_kf!(estimator::Estimator)
     lock(estimator.queue_lock) do
         if isempty(estimator.frame_queue)
@@ -91,16 +136,6 @@ function get_new_kf!(estimator::Estimator)
         @debug "[ES] Popping queue $(length(estimator.frame_queue)): $(kf.kfid)."
         kf
     end
-end
-
-function LocalBACache(
-    observations, bad_keypoints, θ, θconst, pixels,
-    poses_ids, points_ids, poses_remap, points_remap,
-)
-    outliers = Vector{Bool}(undef, length(observations))
-    LocalBACache(
-        observations, outliers, bad_keypoints, θ, θconst, pixels,
-        poses_ids, points_ids, poses_remap, points_remap)
 end
 
 function _get_ba_parameters(
@@ -273,6 +308,10 @@ function _update_ba_parameters!(
 end
 
 """
+```julia
+local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
+```
+
 Perform Bundle-Adjustment on the new frame and its covisibility graph.
 
 Minimize error function over all KeyFrame's extrinsic parameters
@@ -319,6 +358,10 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
 end
 
 """
+```julia
+map_filtering!(estimator::Estimator, new_keyframe::Frame)
+```
+
 Filter out KeyFrames that share too many MapPoints with other KeyFrames
 in the covisibility graph. Since they are not informative.
 """
@@ -374,6 +417,13 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
     @debug "[ES] Removed $n_removed KeyFrames."
 end
 
+"""
+```julia
+reset!(estimator::Estimator)
+```
+
+Reset Estimator.
+"""
 function reset!(estimator::Estimator)
     lock(estimator.queue_lock) do
         estimator.new_kf_available = false

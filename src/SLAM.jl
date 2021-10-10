@@ -79,6 +79,45 @@ include("mapper.jl")
 include("visualizer.jl")
 include("bundle_adjustment.jl")
 
+"""
+```julia
+SlamManager(
+    params::Params, camera::Camera;
+    right_camera::Union{Nothing, Camera} = nothing,
+)
+```
+
+Slam Manager that is the highest level component in the system.
+It is responsible for sending new frames to the other components
+and for processing their outputs.
+
+**Note**, that upon creating, SlamManager launches Mapper
+in the separate thread.
+
+# Arguments
+
+- `params::Params`: Parameters of the system.
+- `image_queue::Vector{Matrix{Gray{Float64}}}`: Queue of the images to be
+    processed.
+- `right_image_queue::Vector{Matrix{Gray{Float64}}}`: In case of stereo mode,
+    queue of images for the right camera.
+    It should be in sync with `image_queue` which in this case is for the left
+    camera.
+- `time_queue::Vector{Float64}`: Queue of timestamps for each of the frame.
+    The timestamps are used in the motion model to predict next pose for the
+    frame, before it is actually computed.
+- `current_frame::Frame`: Current frame that is processed. It is shared among
+    all other components in the system.
+- `frame_id::Int64`: Id of the current frame.
+- `front_end::FrontEnd`: Front-End component that is used for tracking.
+- `map_manager::MapManager`: Map manager for the managment of
+    keyframes & mappoints.
+- `mapper::Mapper`: Mapper that is used for triangulation of keypoints.
+    It is launched in the constructor as a separate thread.
+- `extractor::Extractor`: Used in extraction of keypoints from the frames.
+- `exit_required::Bool`: Set it to `true` to stop SlamManager
+    once it is launched.
+"""
 mutable struct SlamManager
     params::Params
 
@@ -94,7 +133,6 @@ mutable struct SlamManager
     mapper::Mapper
     extractor::Extractor
 
-    camera::Camera
     exit_required::Bool
 
     mapper_thread
@@ -132,9 +170,16 @@ function SlamManager(
         params, image_queue, right_image_queue,
         time_queue, frame, frame.id,
         front_end, map_manager, mapper, extractor,
-        camera, false, mapper_thread, ReentrantLock())
+        false, mapper_thread, ReentrantLock())
 end
 
+"""
+```julia
+add_image!(sm::SlamManager, image, time)
+```
+
+Add monocular image and its timestamp to the queue.
+"""
 function add_image!(sm::SlamManager, image, time)
     lock(sm.image_lock) do
         push!(sm.image_queue, image)
@@ -143,6 +188,13 @@ function add_image!(sm::SlamManager, image, time)
     end
 end
 
+"""
+```julia
+add_stereo_image!(sm::SlamManager, image, right_image, time)
+```
+
+Add stereo image and its timestamp to the queue.
+"""
 function add_stereo_image!(sm::SlamManager, image, right_image, time)
     lock(sm.image_lock) do
         push!(sm.image_queue, image)
@@ -152,6 +204,18 @@ function add_stereo_image!(sm::SlamManager, image, right_image, time)
     end
 end
 
+"""
+```julia
+get_image!(sm::SlamManager)
+```
+
+Get monocular image and its timestamp from the queue.
+
+# Returns:
+
+`(image, timestamp)` if there is an image in the queue.
+Otherwise `(nothing, nothing)`.
+"""
 function get_image!(sm::SlamManager)
     lock(sm.image_lock) do
         isempty(sm.image_queue) && return nothing, nothing
@@ -161,10 +225,22 @@ function get_image!(sm::SlamManager)
     end
 end
 
+"""
+```julia
+get_stereo_image!(sm::SlamManager)
+```
+
+Get stereo image and its timestamp from the queue.
+
+# Returns:
+
+`(image, right_image, timestamp)` if there is an image in the queue.
+Otherwise `(nothing, nothing, nothing)`.
+"""
 function get_stereo_image!(sm::SlamManager)
     lock(sm.image_lock) do
         (isempty(sm.image_queue) || isempty(sm.right_image_queue)) &&
-            return nothing, nothing, 0.0
+            return nothing, nothing, nothing
 
         image = popfirst!(sm.image_queue)
         right_image = popfirst!(sm.right_image_queue)
@@ -173,12 +249,32 @@ function get_stereo_image!(sm::SlamManager)
     end
 end
 
+"""
+```julia
+get_queue_size(sm::SlamManager)
+```
+
+Get size of the queue of images to be processed.
+"""
 function get_queue_size(sm::SlamManager)
     lock(sm.image_lock) do
         length(sm.image_queue)
     end
 end
 
+"""
+```julia
+run!(sm::SlamManager)
+```
+
+Main routine for the SlamManager. It runs until `exit_required` variable
+is set to `true`. After that, it will end its work, wait for other threads
+and finish.
+
+Once there is a frame in the queue, it will get it and first send it to the
+FrontEnd for tracking. If FrontEnd requires a new Keyframe, then it will also
+send it to the mapper thread for Keyframe creation and triangulation.
+"""
 function run!(sm::SlamManager)
     image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
     right_image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
@@ -223,6 +319,13 @@ function run!(sm::SlamManager)
     @debug "[SM] Exit required."
 end
 
+"""
+```julia
+reset!(sm::SlamManager)
+```
+
+Reset slam manager, front-end and map_manager.
+"""
 function reset!(sm::SlamManager)
     @warn "[Slam Manager] Reset required."
     sm.params |> reset!
