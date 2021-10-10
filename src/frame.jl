@@ -1,16 +1,33 @@
+"""
+Keypoint is a feature in the image used for tracking.
+
+# Parameters:
+
+- `id::Int64`: Id of the Keypoint.
+- `pixel::Point2f`: Pixel coordinate in the image plane in `(y, x)` format.
+- `undistorted_pixel::Point2f`: In presence of distortion in camera,
+    this is the undistorted `pixel` coordinates.
+- `position::Point3f`: Pre-divided (backprojected) keypoint in camera space.
+    This is used in algorithms like 5Pt for Essential matrix calculation.
+- `descriptor::BitVector`: Descriptor of a keypoint.
+- `is_3d::Bool`: If `true`, then this keypoint was triangulated.
+- `is_retracked::Bool`: If `true`, then this keypoint was lost
+    and re-tracked back by `match_local_map!` method.
+- `is_stereo::Bool`: If `true`, then this keypoint has left↔right
+    correspondence for the stereo image.
+- `right_pixel::Point2f`: Pixel coordinate in the right image plane
+    in `(y, x)` format.
+- `right_undistorted_pixel::Point2f`: In presence of distortion in camera,
+    this is the undistorted `right_pixel` coordinates.
+- `right_position::Point3f`: Pre-divided (backprojected) right keypoint
+    in camera space. This is used in algorithms like 5Pt
+    for Essential matrix calculation.
+"""
 mutable struct Keypoint
-    """
-    Unique Keypoint id.
-    """
     id::Int64
-    """
-    Coordinates of a keypoint in `(y, x)` format.
-    """
     pixel::Point2f
     undistorted_pixel::Point2f
-    """
-    Position of a keypoint in 3D space in `(x, y, z = 1)` format.
-    """
+
     position::Point3f
     descriptor::BitVector
 
@@ -30,30 +47,51 @@ function Keypoint(id, pixel, undistorted_pixel, position, descriptor, is_3d)
         pixel, undistorted_pixel, position)
 end
 
+"""
+Frame that encapsulates information of a camera in space at a certain moment.
+
+# Parameters:
+
+- `id::Int64`: Id of the Frame.
+- `kfid::Int64`: Id of the Frame in the global map, contained in MapManager.
+    Frames that are in this map are called "Key-Frames".
+- `time::Float64`: Time of the frame at which it was taken on the camera.
+- `cw::SMatrix{4, 4, Float64, 16}`: Transformation matrix `[R|t]`
+    that transforms from world to camera space.
+- `wc::SMatrix{4, 4, Float64, 16}`: Transformation matrix `[R|t]`
+    that transforms from camera to world space.
+- `camera::Camera`: Camera associated with this frame.
+- `right_camera::Camera`: In case of stereo, this is the camera
+    associated with the right frame.
+- `keypoints::Dict{Int64, Keypoint}`: Map of that this frames observes.
+- `ketpoints_grid::Matrix{Set{Int64}}`: Grid, where each cell contains
+    several keypoints. This is useful when want to retrieve neighbours
+    for a certain Keypoint.
+- `nb_occupied_cells::Int64`: Number of cells in `keypoints_grid` that have
+    at least one Keypoint.
+- `cell_size::Int64`: Cell size in pixels.
+- `nb_keypoints::Int64`: Total number of keypoints in the Frame.
+- `nb_2d_keypoints::Int64`: Total number of 2D keypoints in the Frame.
+- `nb_3d_keypoints::Int64`: Total number of 3D keypoints in the Frame.
+- `nb_3d_keypoints::Int64`: Total number of stereo keypoints in the Frame.
+- `covisible_kf::OrderedDict{Int64, Int64}`: Dictionary with `kfid` => `score`
+    of ids of Frames that observe the sub-set of size `score` of keypoints
+    in Frame.
+- `local_map_ids::Set{Int64}`: Set of ids of MapPoints that are not visible
+    in this Frame, but are a potential candidates for remapping
+    back into this Frame.
+"""
 mutable struct Frame
-    """
-    Id of this Frame.
-    """
     id::Int64
-    """
-    Id of the corresponding KeyFrame, which is created by Mapper.
-    KeyFrame id in the MapManager.
-    """
     kfid::Int64
 
     time::Float64
-    # world → camera transformation.
     cw::SMatrix{4, 4, Float64, 16}
-    # camera → world transformation.
     wc::SMatrix{4, 4, Float64, 16}
 
     camera::Camera
     right_camera::Camera
 
-    """
-    Map of observed keypoints.
-    Keypoint id → Keypoint.
-    """
     keypoints::Dict{Int64, Keypoint}
     keypoints_grid::Matrix{Set{Int64}}
 
@@ -65,10 +103,6 @@ mutable struct Frame
     nb_3d_kpts::Int64
     nb_stereo_kpts::Int64
 
-    """
-    Map of covisible KeyFrames.
-    KFid → Number of MapPoints that this Frame shared with `KFid` frame.
-    """
     covisible_kf::OrderedDict{Int64, Int64}
     local_map_ids::Set{Int64}
 
@@ -79,11 +113,10 @@ mutable struct Frame
 end
 
 function Frame(;
-    camera::Camera, right_camera::Union{Nothing, Camera} = nothing,
-    cell_size::Int64,
-    id::Int64 = 0, kfid::Int64 = 0, time::Float64 = 0.0,
-    cw::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
-    wc::SMatrix{4, 4, Float64} = SMatrix{4, 4, Float64}(I),
+    camera, right_camera = nothing, cell_size,
+    id = 0, kfid = 0, time = 0.0,
+    cw = SMatrix{4, 4, Float64}(I),
+    wc = SMatrix{4, 4, Float64}(I),
 )
     if right_camera ≡ nothing
         @warn "[F] No right camera."
@@ -254,7 +287,7 @@ function update_stereo_keypoint!(f::Frame, kpid, right_pixel)
     end
 end
 
-function update_keypoint!(f::Frame, prev_id, new_id, is_3d::Bool)
+function update_keypoint!(f::Frame, prev_id, new_id, is_3d)
     has_new = false
     lock(f.keypoints_lock)
     has_new = new_id in keys(f.keypoints)
@@ -526,7 +559,7 @@ function get_surrounding_keypoints(f::Frame, kp::Keypoint)
     keypoints
 end
 
-function get_surrounding_keypoints(f::Frame, pixel::Point2f)
+function get_surrounding_keypoints(f::Frame, pixel)
     keypoints = Vector{Keypoint}(undef, 0)
     sizehint!(keypoints, 20)
     kpi = to_cartesian(pixel, f.cell_size)

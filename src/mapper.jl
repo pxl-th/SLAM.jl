@@ -186,7 +186,6 @@ function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
         return
     end
 
-    @debug "[MP] Triangulating $(length(keypoints)) Keypoints..."
     K = to_4x4(frame.camera.K)
     # P1 - previous Keyframe, P2 - this `frame`.
     P1 = K * SMatrix{4, 4, Float64, 16}(I)

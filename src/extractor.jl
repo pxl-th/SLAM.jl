@@ -45,6 +45,7 @@ end
 Detect keypoints in the `image`.
 
 # Arguments:
+
 - `current_points`:
     Vector of points, which define circular regions, where to avoid
     detecting new features. This can be used to decrease the amount of
@@ -56,11 +57,10 @@ Detect keypoints in the `image`.
     Pass `0` to skip this step.
 
 # Returns:
-    Keypoints in the `(y, x)` format.
+
+Keypoints in the `(y, x)` format.
 """
-function detect(
-    e::Extractor, image, current_points; σ_mask::Real = 3,
-)::Vector{CartesianIndex{2}}
+function detect(e::Extractor, image, current_points; σ_mask = 3)
     length(current_points) ≥ e.max_points && return CartesianIndex{2}[]
 
     if !isempty(current_points)
@@ -94,9 +94,13 @@ function detect(
     features
 end
 
-function describe(
-    e::Extractor, image, keypoints,
-)::Tuple{Vector{BitVector}, Vector{CartesianIndex{2}}}
+"""
+# Returns:
+
+Vector of descriptors of `BitVector` type
+and vector of keypoints' coordinates of type `CartesianIndex{2}`.
+"""
+function describe(e::Extractor, image, keypoints)
     create_descriptor(image, keypoints, e.descriptor)
 end
 

@@ -1,3 +1,25 @@
+"""
+Front-End is responsible for tracking keypoints
+and computing poses for the Frames.
+It also decides when the system needs a new Keyframe in the map.
+
+# Parameters:
+
+- `current_frame::Frame`: Current frame that is being processed.
+    This is a shared Frame between FrontEnd, MapManager, Estimator
+    and SlamManager.
+- `motion_model::MotionModel`: Motion model that is used to predict
+    pose for the Frame before the actual pose for it was computed.
+- `map_manager::MapManager`: Map manager that is responsible for the
+    creation of new Keyframes in the map.
+- `params::Params`: Parameters of the system.
+- `current_image::Matrix{Gray{Float64}}`: Current image that is processed.
+- `previous_image::Matrix{Gray{Float64}}`: Previous processed image.
+- `current_pyramid::ImageTracking.LKPyramid`: Pre-computed pyramid
+    that is used for optical flow tracking for the `current_image`.
+- `previous_pyramid::ImageTracking.LKPyramid`: Pre-computed pyramid
+    that is used for optical flow tracking for the `previous_image`.
+"""
 mutable struct FrontEnd
     current_frame::Frame
     motion_model::MotionModel
@@ -9,8 +31,6 @@ mutable struct FrontEnd
 
     current_pyramid::ImageTracking.LKPyramid
     previous_pyramid::ImageTracking.LKPyramid
-
-    p3p_required::Bool
 end
 
 function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
@@ -20,9 +40,22 @@ function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
     FrontEnd(
         frame, MotionModel(), map_manager, params,
         Matrix{Gray{Float64}}(undef, 0, 0), Matrix{Gray{Float64}}(undef, 0, 0),
-        empty_pyr, empty_pyr, false)
+        empty_pyr, empty_pyr)
 end
 
+"""
+```julia
+track!(fe::FrontEnd, image, time)
+```
+
+Given an image and time at which it was taken, track keypoints in it.
+After tracking, decide if the system needs a new Keyframe added to the map.
+If it is the first image to be tracked, then Keyframe is always needed.
+
+# Returns:
+
+`true` if the system needs a new Keyframe, otherwise `false`.
+"""
 function track!(fe::FrontEnd, image, time)
     is_kf_required = false
 
@@ -35,10 +68,7 @@ function track!(fe::FrontEnd, image, time)
         # draw_keypoints!(vimage, fe.current_frame)
         # save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
 
-        if is_kf_required
-            create_keyframe!(fe.map_manager, image)
-        end
-        is_kf_required
+        is_kf_required && create_keyframe!(fe.map_manager, image)
     catch e
         showerror(stdout, e)
         display(stacktrace(catch_backtrace()))
@@ -86,7 +116,7 @@ function track_mono!(fe::FrontEnd, image, image_time)::Bool
         set_cw!(fe.current_frame, pose_5pt)
 
     t1 = time()
-    compute_pose!(fe)
+    succ = compute_pose!(fe)
     t2 = time()
     @debug "[FE] Compute Pose ($(t2 - t1) sec)."
 
@@ -96,16 +126,24 @@ function track_mono!(fe::FrontEnd, image, image_time)::Bool
 end
 
 """
+```julia
+compute_pose!(fe::FrontEnd)
+```
+
 Compute pose of a current Frame using P3P Ransac algorithm.
+Pose is computed from the triangulated Keypoints (MapPoints) that are visible
+in this frame.
+
+# Returns:
+
+`true` if the pose was successfully computed and applied to current Frame,
+otherwise `false`.
 """
 function compute_pose!(fe::FrontEnd)
     if fe.current_frame.nb_3d_kpts < 5
         @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts)."
         return false
     end
-
-    do_p3p = true
-    # do_p3p = fe.p3p_required && fe.params.do_p3p
 
     p3p_pixels = Vector{Point2f}(undef, fe.current_frame.nb_3d_kpts)
     p3p_pdn_positions = Vector{Point3f}(undef, fe.current_frame.nb_3d_kpts)
@@ -118,7 +156,7 @@ function compute_pose!(fe::FrontEnd)
         mp = get(fe.map_manager.map_points, kp.id, nothing)
         mp ≡ nothing && continue
 
-        do_p3p && (p3p_pdn_positions[i] = normalize(kp.position);)
+        p3p_pdn_positions[i] = normalize(kp.position)
         # Convert pixel to `(x, y)` format, expected by P3P.
         p3p_pixels[i] = kp.undistorted_pixel[[2, 1]]
         p3p_3d_points[i] = mp.position
@@ -127,64 +165,58 @@ function compute_pose!(fe::FrontEnd)
     end
 
     i -= 1
-    do_p3p && (p3p_pdn_positions = @view(p3p_pdn_positions[1:i]);)
+    p3p_pdn_positions = @view(p3p_pdn_positions[1:i])
     p3p_pixels = @view(p3p_pixels[1:i])
     p3p_3d_points = @view(p3p_3d_points[1:i])
     p3p_kpids = @view(p3p_kpids[1:i])
 
-    if do_p3p
-        # P3P computes world → camera projection.
-        res = p3p_ransac(
-            p3p_3d_points, p3p_pixels, p3p_pdn_positions,
-            fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
-        )
-        if res ≡ nothing
-            @warn "[FE] P3P Ransac returned Nothing."
-            fe |> reset_frame!
-            return false
-        end
-
-        n_inliers, model = res
-        if n_inliers < 5 || model ≡ nothing
-            @warn "[FE] P3P too few inliers - resetting!"
-            fe |> reset_frame!
-            return false
-        end
-
-        KP, inliers, error = model
-        set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP))
-        # Remove outliers after P3P.
-        for (kpid, inlier) in zip(p3p_kpids, inliers)
-            inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
-        end
-
-        # Prepare data for BA refinement.
-        p3p_3d_points = @view(p3p_3d_points[inliers])
-        p3p_kpids = @view(p3p_kpids[inliers])
-
-        c = 1
-        for i in 1:length(p3p_pixels)
-            inliers[i] || continue
-            p = p3p_pixels[i]
-            p3p_pixels[c] = Point2f(p[2], p[1])
-            c += 1
-        end
-        p3p_pixels = @view(p3p_pixels[1:n_inliers])
-    else
-        for i in 1:length(p3p_pixels)
-            p = p3p_pixels[i]
-            p3p_pixels[i] = Point2f(p[2], p[1])
-        end
+    # P3P computes world → camera projection.
+    res = p3p_ransac(
+        p3p_3d_points, p3p_pixels, p3p_pdn_positions,
+        fe.current_frame.camera.K; threshold=fe.params.max_reprojection_error,
+    )
+    if res ≡ nothing
+        @warn "[FE] P3P Ransac returned Nothing."
+        fe |> reset_frame!
+        return false
     end
 
+    n_inliers, model = res
+    if n_inliers < 5 || model ≡ nothing
+        @warn "[FE] P3P too few inliers - resetting!"
+        fe |> reset_frame!
+        return false
+    end
+
+    KP, inliers, error = model
+    set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP))
+    # Remove outliers after P3P.
+    for (kpid, inlier) in zip(p3p_kpids, inliers)
+        inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
+    end
+
+    # Prepare data for BA refinement.
+    p3p_3d_points = @view(p3p_3d_points[inliers])
+    p3p_kpids = @view(p3p_kpids[inliers])
+
+    c = 1
+    for i in 1:length(p3p_pixels)
+        inliers[i] || continue
+        p = p3p_pixels[i]
+        p3p_pixels[c] = Point2f(p[2], p[1])
+        c += 1
+    end
+    p3p_pixels = @view(p3p_pixels[1:n_inliers])
+
+    # Refinement.
     new_T, init_error, res_error, outliers, n_outliers = pnp_bundle_adjustment(
         fe.current_frame.camera, fe.current_frame.cw,
         p3p_pixels, p3p_3d_points;
-        iterations=10, show_trace=false, repr_ϵ=fe.params.max_reprojection_error,
+        iterations=10, show_trace=false,
+        repr_ϵ=fe.params.max_reprojection_error,
     )
     if length(p3p_3d_points) - n_outliers < 5 || res_error > init_error
         @warn "[FE] P3P BA too few inliers - resetting!"
-        fe.p3p_required = true
         fe |> reset_frame!
         return false
     end
@@ -194,13 +226,34 @@ function compute_pose!(fe::FrontEnd)
     end
 
     set_cw!(fe.current_frame, new_T)
-    fe.p3p_required = false
     true
 end
 
-function compute_pose_5pt!(
-    fe::FrontEnd; min_parallax::Real, use_motion_model::Bool,
-)::Union{Nothing, SMatrix{4, 4, Float64}}
+"""
+```julia
+compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
+```
+
+Copmute pose for pixel correspondences using 5-point algorithm
+to recover essential matrix, then pose from it.
+
+# Arguments:
+
+- `min_parallax`: Minimum parallax required between pixels in the current Frame
+    and previous Keyframe to compute pose.
+    Note, that parallax is rotation-compensated, meaning a rotation from
+    current to previous frame is computed and applied to every pixel.
+- `use_motion_model`: If `true`, then use constant-velocity motion model
+    to predict next pose from previous frame.
+    Otherwise, the computed pose will be "local".
+
+# Returns:
+
+If successfull, 4x4 pose matrix, that transforms points
+from previous Keyframe to current Frame.
+Otherwise `nothing`.
+"""
+function compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
     if fe.current_frame.nb_keypoints < 8
         @debug "[FE] Not enough keypoints for initialization: " *
             "$(fe.current_frame.nb_keypoints)"
@@ -286,6 +339,10 @@ function compute_pose_5pt!(
 end
 
 """
+```julia
+check_ready_for_init!(fe::FrontEnd)
+```
+
 Check if there is enough average rotation compensated parallax
 between current Frame and previous KeyFrame.
 
@@ -306,9 +363,13 @@ function check_ready_for_init!(fe::FrontEnd)
 end
 
 """
+```julia
+check_new_kf_required(fe::FrontEnd)
+```
+
 Check if we need to insert a new KeyFrame into the Map.
 """
-function check_new_kf_required(fe::FrontEnd)::Bool
+function check_new_kf_required(fe::FrontEnd)
     prev_kf = get(fe.map_manager.frames_map, fe.current_frame.kfid, nothing)
     prev_kf ≡ nothing && return false
 
@@ -343,6 +404,13 @@ function check_new_kf_required(fe::FrontEnd)::Bool
 end
 
 """
+```julia
+compute_parallax(
+    fe::FrontEnd, current_frame_id;
+    compensate_rotation = true, only_2d = true, median_parallax = true,
+)
+```
+
 Compute parallax in pixels between current Frame
 and the provided `current_frame_id` Frame.
 
@@ -356,9 +424,8 @@ and the provided `current_frame_id` Frame.
     Instead of the average, compute median parallax. Default is `true`.
 """
 function compute_parallax(
-    fe::FrontEnd, current_frame_id::Int;
-    compensate_rotation::Bool = true,
-    only_2d::Bool = true, median_parallax::Bool = true,
+    fe::FrontEnd, current_frame_id;
+    compensate_rotation = true, only_2d = true, median_parallax = true,
 )
     frame = get(fe.map_manager.frames_map, current_frame_id, nothing)
     if frame ≡ nothing
@@ -408,12 +475,26 @@ function preprocess!(fe::FrontEnd, image)
     fe.current_image = image
 end
 
+"""
+```julia
+klt_tracking!(fe::FrontEnd)
+```
+
+Track keypoints from previous frame to current frame.
+"""
 function klt_tracking!(fe::FrontEnd)
     optical_flow_matching!(
         fe.map_manager, fe.current_frame,
         fe.previous_pyramid, fe.current_pyramid, false)
 end
 
+"""
+```julia
+reset_frame!(fe::FrontEnd)
+```
+
+Reset current Frame in Front-End.
+"""
 function reset_frame!(fe::FrontEnd)
     for kpid in keys(fe.current_frame.keypoints)
         remove_obs_from_current_frame!(fe.map_manager, kpid)
@@ -427,6 +508,13 @@ function reset_frame!(fe::FrontEnd)
     fe.current_frame.nb_occupied_cells = 0
 end
 
+"""
+```julia
+reset!(fe::FrontEnd)
+```
+
+Reset Front-End.
+"""
 function reset!(fe::FrontEnd)
     empty_pyr = ImageTracking.LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],

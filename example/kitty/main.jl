@@ -27,8 +27,8 @@ function main(n_frames::Int)
     height, width = 376, 1241
     # height, width = 370, 1226
 
-    camera = SLAM.Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
-    right_camera = SLAM.Camera(
+    camera = Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
+    right_camera = Camera(
         fx, fy, cx, cy, 0, 0, 0, 0, height, width; Ti0=dataset.Ti0)
 
     params = Params(;
@@ -108,9 +108,9 @@ function main(n_frames::Int)
     lines!(
         visualizer.pc_axis, slam_positions;
         color=:red, quality=1, linewidth=2)
-    meshscatter!(
-        visualizer.pc_axis, slam_mappoints;
-        color=:black, markersize, quality=8)
+    # meshscatter!(
+    #     visualizer.pc_axis, slam_mappoints;
+    #     color=:black, markersize, quality=8)
 
     @show min_bound
     @show max_bound
