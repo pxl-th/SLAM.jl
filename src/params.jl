@@ -69,6 +69,7 @@ Base.@kwdef mutable struct Params
     filtering_ratio::Float64 = 0.9
     do_local_matching::Bool = false
     map_filtering::Bool = false
+    do_local_bundle_adjustment::Bool = true
     max_projection_distance::Float64 = 2.0
     max_descriptor_distance::Float64 = 0.35
 

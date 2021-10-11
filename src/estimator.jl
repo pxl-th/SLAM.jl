@@ -85,7 +85,7 @@ function run!(estimator::Estimator)
             continue
         end
 
-        if new_kf.kfid ≥ 2
+        if estimator.params.do_local_bundle_adjustment && new_kf.kfid ≥ 2
             lock(estimator.map_manager.optimization_lock)
             try
                 local_bundle_adjustment!(estimator, new_kf)

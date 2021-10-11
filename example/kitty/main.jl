@@ -29,7 +29,8 @@ function main(n_frames)
     params = Params(;
         stereo,
         window_size=9, max_distance=35, pyramid_levels=3,
-        max_nb_keypoints=1000, max_reprojection_error=3.0)
+        max_nb_keypoints=1000, max_reprojection_error=3.0,
+        do_local_bundle_adjustment=false)
 
     saver = ReplaySaver()
     visualizer = nothing
