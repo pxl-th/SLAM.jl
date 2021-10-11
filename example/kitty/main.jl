@@ -5,30 +5,25 @@ using SLAM
 
 include("kitty.jl")
 
-function main(n_frames::Int)
+function main(n_frames)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "00"
+    sequence = "05"
     stereo = true
 
     dataset = KittyDataset(base_dir, sequence; stereo)
     println(dataset)
 
     save_dir = joinpath("/home/pxl-th/projects", "kitty-$sequence")
-    frames_dir = joinpath(save_dir, "frames")
     isdir(save_dir) || mkdir(save_dir)
-    isdir(frames_dir) || mkdir(frames_dir)
     @info "Save directory: $save_dir"
-
-    mappoints_save_file = joinpath(save_dir, "mappoints.bson")
-    positions_save_file = joinpath(save_dir, "positions.bson")
 
     fx, fy = dataset.K[1, 1], dataset.K[2, 2]
     cx, cy = dataset.K[1:2, 3]
-    height, width = 376, 1241
-    # height, width = 370, 1226
+    # height, width = 376, 1241
+    height, width = 370, 1226
 
-    camera = Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
-    right_camera = Camera(
+    camera = SLAM.Camera(fx, fy, cx, cy, 0, 0, 0, 0, height, width)
+    right_camera = SLAM.Camera(
         fx, fy, cx, cy, 0, 0, 0, 0, height, width; Ti0=dataset.Ti0)
 
     params = Params(;
@@ -36,11 +31,15 @@ function main(n_frames::Int)
         window_size=9, max_distance=35, pyramid_levels=3,
         max_nb_keypoints=1000, max_reprojection_error=3.0)
 
-    slam_manager = SlamManager(params, camera; right_camera)
+    saver = ReplaySaver()
+    visualizer = nothing
+    # visualizer = Visualizer((900, 600))
+    # display(visualizer)
+
+    slam_manager = SlamManager(params, camera; right_camera, visualizer=saver)
     slam_manager_thread = Threads.@spawn run!(slam_manager)
 
     t1 = time()
-
     for i in 1:n_frames
         timestamp = dataset.timestamps[i]
         left_frame, right_frame = dataset[i]
@@ -53,6 +52,11 @@ function main(n_frames::Int)
             add_image!(slam_manager, left_frame, timestamp)
         end
 
+        if visualizer ≢ nothing
+            SLAM.set_image!(visualizer, rotr90(left_frame))
+            process_frame_wc!(visualizer)
+        end
+
         q_size = get_queue_size(slam_manager)
         f_size = length(slam_manager.mapper.estimator.frame_queue)
         m_size = length(slam_manager.mapper.keyframe_queue)
@@ -62,6 +66,7 @@ function main(n_frames::Int)
             f_size = length(slam_manager.mapper.estimator.frame_queue)
             m_size = length(slam_manager.mapper.keyframe_queue)
         end
+
         sleep(1e-2)
     end
 
@@ -71,53 +76,44 @@ function main(n_frames::Int)
     t2 = time()
     @info "SLAM took: $(t2 - t1) seconds."
 
-    # Visualize result.
-    map_manager = slam_manager.map_manager
-    kfids = sort!(collect(keys(map_manager.frames_map)))
+    SLAM.save(saver, save_dir)
+    visualizer
+end
 
-    min_bound = Point3f0(maxintfloat())
-    max_bound = Point3f0(-maxintfloat())
+function replay(n_frames)
+    base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
+    sequence = "02"
+    stereo = false
 
-    base_position = SVector{4, Float64}(0, 0, 0, 1)
-    slam_mappoints = Vector{Point3f0}[]
-    slam_positions = Point3f0[]
+    dataset = KittyDataset(base_dir, sequence; stereo)
+    println(dataset)
 
-    for kfid in kfids
-        pose = map_manager.frames_map[kfid].wc
-        position = (pose * base_position)[1:3]
-        position = position[[1, 3, 2]]
-        push!(slam_positions, position)
+    save_dir = joinpath("/home/pxl-th/projects", "kitty-$sequence")
+    isdir(save_dir) || mkdir(save_dir)
+    @info "Save directory: $save_dir"
 
-        min_bound = min.(min_bound, position)
-        max_bound = max.(max_bound, position)
+    saver = ReplaySaver()
+    SLAM.load!(saver, save_dir)
+    @assert length(saver.positions) == n_frames - 1
+
+    resolution = (900, 600)
+    image_resolution = (1241, 376)
+    visualizer = Visualizer(;resolution, image_resolution)
+    display(visualizer)
+
+    t1 = time()
+    for i in 2:n_frames
+        left_frame, right_frame = dataset[i]
+        left_frame = Gray{Float64}.(left_frame)
+
+        position = saver.positions[i - 1]
+        set_image!(visualizer, rotr90(left_frame))
+        set_position!(visualizer, position)
+
+        sleep(1 / 60)
     end
-    slam_mappoints = [
-        Point3f0(m.position[[1, 3, 2]])
-        for m in values(map_manager.map_points)
-        if m.is_3d]
+    t2 = time()
+    @info "Visualization took: $(t2 - t1) seconds."
 
-    @save mappoints_save_file slam_mappoints
-    @save positions_save_file slam_positions
-
-    @load mappoints_save_file slam_mappoints
-    @load positions_save_file slam_positions
-
-    visualizer = Visualizer((height, width))
-    markersize = 0.07
-
-    lines!(
-        visualizer.pc_axis, slam_positions;
-        color=:red, quality=1, linewidth=2)
-    # meshscatter!(
-    #     visualizer.pc_axis, slam_mappoints;
-    #     color=:black, markersize, quality=8)
-
-    @show min_bound
-    @show max_bound
-
-    xlims!(visualizer.pc_axis, min_bound[1], max_bound[1])
-    ylims!(visualizer.pc_axis, min_bound[2], max_bound[2])
-    zlims!(visualizer.pc_axis, min_bound[3], max_bound[3])
-
-    slam_manager, visualizer.figure
+    visualizer
 end

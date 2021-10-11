@@ -169,13 +169,14 @@ Copy current MapManager's Frame and add it to the KeyFrame map.
 Increase current keyframe id & total number of keyframes.
 """
 function add_keyframe!(m::MapManager)
-    new_keyframe = m.current_frame |> deepcopy
+    new_keyframe = deepcopy(m.current_frame)
 
     lock(m.keyframe_lock) do
         m.frames_map[m.current_keyframe_id] = new_keyframe
         m.current_keyframe_id += 1
         m.nb_keyframes += 1
     end
+    @debug "[MM] Added."
 end
 
 function remove_keyframe!(m::MapManager, kfid)

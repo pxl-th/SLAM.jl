@@ -56,12 +56,12 @@ If it is the first image to be tracked, then Keyframe is always needed.
 
 `true` if the system needs a new Keyframe, otherwise `false`.
 """
-function track!(fe::FrontEnd, image, time)
+function track!(fe::FrontEnd, image, time, visualizer)
     is_kf_required = false
 
     lock(fe.map_manager.map_lock)
     try
-        is_kf_required = track_mono!(fe, image, time)
+        is_kf_required = track_mono!(fe, image, time, visualizer)
         @debug "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
 
         # vimage = RGB{Float64}.(fe.current_image)
@@ -78,12 +78,14 @@ function track!(fe::FrontEnd, image, time)
     is_kf_required
 end
 
-function track_mono!(fe::FrontEnd, image, image_time)::Bool
+function track_mono!(fe::FrontEnd, image, image_time, visualizer)
     preprocess!(fe, image)
     # If it's the first frame, then KeyFrame is always needed.
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
-    set_wc!(fe.current_frame, fe.motion_model(fe.current_frame.wc, image_time))
+    set_wc!(
+        fe.current_frame, fe.motion_model(fe.current_frame.wc, image_time),
+        visualizer)
 
     t1 = time()
     klt_tracking!(fe)
@@ -95,7 +97,7 @@ function track_mono!(fe::FrontEnd, image, image_time)::Bool
             @warn "[Front End] NB KP < 50. Reset required."
             fe.params.reset_required = true
             return false
-        elseif check_ready_for_init!(fe)
+        elseif check_ready_for_init!(fe, visualizer)
             @debug "[Front End] System ready for initialization."
             fe.params.vision_initialized = true
             return true
@@ -113,10 +115,10 @@ function track_mono!(fe::FrontEnd, image, image_time)::Bool
     @debug "[FE] 5PT Pose ($(t2 - t1) sec)."
 
     fe.map_manager.nb_keyframes > 2 && pose_5pt ≢ nothing &&
-        set_cw!(fe.current_frame, pose_5pt)
+        set_cw!(fe.current_frame, pose_5pt, visualizer)
 
     t1 = time()
-    succ = compute_pose!(fe)
+    compute_pose!(fe, visualizer)
     t2 = time()
     @debug "[FE] Compute Pose ($(t2 - t1) sec)."
 
@@ -139,7 +141,7 @@ in this frame.
 `true` if the pose was successfully computed and applied to current Frame,
 otherwise `false`.
 """
-function compute_pose!(fe::FrontEnd)
+function compute_pose!(fe::FrontEnd, visualizer)
     if fe.current_frame.nb_3d_kpts < 5
         @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts)."
         return false
@@ -189,7 +191,8 @@ function compute_pose!(fe::FrontEnd)
     end
 
     KP, inliers, error = model
-    set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP))
+    set_cw!(
+        fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP), visualizer)
     # Remove outliers after P3P.
     for (kpid, inlier) in zip(p3p_kpids, inliers)
         inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
@@ -225,7 +228,7 @@ function compute_pose!(fe::FrontEnd)
         outlier && remove_obs_from_current_frame!(fe.map_manager, kpid)
     end
 
-    set_cw!(fe.current_frame, new_T)
+    set_cw!(fe.current_frame, new_T, visualizer)
     true
 end
 
@@ -349,7 +352,7 @@ between current Frame and previous KeyFrame.
 Additionally, compute Essential matrix using 5-point Ransac algorithm
 to filter out outliers and check if there is enough inliers to proceed.
 """
-function check_ready_for_init!(fe::FrontEnd)
+function check_ready_for_init!(fe::FrontEnd, visualizer)
     avg_parallax = compute_parallax(
         fe, fe.current_frame.kfid;
         compensate_rotation=false, median_parallax=false)
@@ -358,7 +361,7 @@ function check_ready_for_init!(fe::FrontEnd)
     pose = compute_pose_5pt!(
         fe; min_parallax=fe.params.initial_parallax, use_motion_model=false)
     ready = pose ≢ nothing
-    ready && set_cw!(fe.current_frame, pose)
+    ready && set_cw!(fe.current_frame, pose, visualizer)
     ready
 end
 

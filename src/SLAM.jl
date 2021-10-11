@@ -1,7 +1,10 @@
 module SLAM
 export SlamManager, add_image!, add_stereo_image!, get_queue_size
-export Params, Camera, run!, to_cartesian, Visualizer, reset!
+export Params, Camera, run!, to_cartesian, reset!
+export Visualizer, ReplaySaver, set_frame_wc!, process_frame_wc!, set_image!
+export set_position!
 
+using BSON: @save, @load
 using OrderedCollections: OrderedSet, OrderedDict
 using GLMakie
 using Images
@@ -76,7 +79,8 @@ include("map_manager.jl")
 include("front_end.jl")
 include("estimator.jl")
 include("mapper.jl")
-include("visualizer.jl")
+include("io/visualizer.jl")
+include("io/saver.jl")
 include("bundle_adjustment.jl")
 
 """
@@ -133,6 +137,8 @@ mutable struct SlamManager
     mapper::Mapper
     extractor::Extractor
 
+    visualizer::Union{Nothing, Visualizer, ReplaySaver}
+
     exit_required::Bool
 
     mapper_thread
@@ -140,8 +146,7 @@ mutable struct SlamManager
 end
 
 function SlamManager(
-    params::Params, camera::Camera;
-    right_camera::Union{Nothing, Camera} = nothing,
+    params, camera; right_camera = nothing, visualizer = nothing,
 )
     params.stereo && right_camera ≡ nothing &&
         error("[SM] Provide `right_camera` when in stereo mode.")
@@ -170,7 +175,68 @@ function SlamManager(
         params, image_queue, right_image_queue,
         time_queue, frame, frame.id,
         front_end, map_manager, mapper, extractor,
+        visualizer,
         false, mapper_thread, ReentrantLock())
+end
+
+"""
+```julia
+run!(sm::SlamManager)
+```
+
+Main routine for the SlamManager. It runs until `exit_required` variable
+is set to `true`. After that, it will end its work, wait for other threads
+and finish.
+
+Once there is a frame in the queue, it will get it and first send it to the
+FrontEnd for tracking. If FrontEnd requires a new Keyframe, then it will also
+send it to the mapper thread for Keyframe creation and triangulation.
+"""
+function run!(sm::SlamManager)
+    image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
+    right_image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
+    time = 0.0
+
+    while !(sm.exit_required)
+        if sm.params.stereo
+            image, right_image, time = get_stereo_image!(sm)
+        else
+            image, time = get_image!(sm)
+        end
+        if image ≡ nothing
+            sleep(1e-2)
+            continue
+        end
+
+        sm.frame_id += 1
+        sm.current_frame.id = sm.frame_id
+        sm.current_frame.time = time
+        @debug "[SM] Frame $(sm.frame_id) @ $time."
+
+        is_kf_required = false
+        try
+            is_kf_required = track!(sm.front_end, image, time, sm.visualizer)
+        catch e
+            showerror(stdout, e); println()
+            display(stacktrace(catch_backtrace())); println()
+        end
+
+        if sm.params.reset_required
+            reset!(sm)
+            continue
+        end
+
+        is_kf_required || continue
+        add_new_kf!(sm.mapper, KeyFrame(
+            sm.current_frame.kfid,
+            sm.params.stereo ? sm.front_end.current_pyramid : nothing,
+            sm.params.stereo ? right_image : nothing))
+        sleep(1e-2)
+    end
+
+    sm.mapper.exit_required = true
+    wait(sm.mapper_thread)
+    @debug "[SM] Exit required."
 end
 
 """
@@ -264,63 +330,6 @@ end
 
 """
 ```julia
-run!(sm::SlamManager)
-```
-
-Main routine for the SlamManager. It runs until `exit_required` variable
-is set to `true`. After that, it will end its work, wait for other threads
-and finish.
-
-Once there is a frame in the queue, it will get it and first send it to the
-FrontEnd for tracking. If FrontEnd requires a new Keyframe, then it will also
-send it to the mapper thread for Keyframe creation and triangulation.
-"""
-function run!(sm::SlamManager)
-    image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
-    right_image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
-    time = 0.0
-
-    while !(sm.exit_required)
-        if sm.params.stereo
-            image, right_image, time = get_stereo_image!(sm)
-        else
-            image, time = get_image!(sm)
-        end
-        if image ≡ nothing
-            sleep(1e-2)
-            continue
-        end
-
-        sm.frame_id += 1
-        sm.current_frame.id = sm.frame_id
-        sm.current_frame.time = time
-        @debug "[SM] Frame $(sm.frame_id) @ $time."
-
-        # Send image to the front end.
-        is_kf_required = track!(sm.front_end, image, time)
-        if sm.params.reset_required
-            reset!(sm)
-            continue
-        end
-
-        # Create new KeyFrame if needed.
-        # Send it to the mapper queue for traingulation.
-        is_kf_required || continue
-
-        add_new_kf!(sm.mapper, KeyFrame(
-            sm.current_frame.kfid,
-            sm.params.stereo ? sm.front_end.current_pyramid : nothing,
-            sm.params.stereo ? right_image : nothing))
-        sleep(1e-2)
-    end
-
-    sm.mapper.exit_required = true
-    wait(sm.mapper_thread)
-    @debug "[SM] Exit required."
-end
-
-"""
-```julia
 reset!(sm::SlamManager)
 ```
 
@@ -329,7 +338,6 @@ Reset slam manager, front-end and map_manager.
 function reset!(sm::SlamManager)
     @warn "[Slam Manager] Reset required."
     sm.params |> reset!
-
     sm.current_frame |> reset!
     sm.front_end |> reset!
     sm.map_manager |> reset!
