@@ -107,7 +107,11 @@ function extract_keypoints!(m::MapManager, image)
     keypoints = detect(m.extractor, image, current_points)
     isempty(keypoints) && return
 
-    descriptors, keypoints = describe(m.extractor, image, keypoints)
+    if m.params.do_local_matching
+        descriptors, keypoints = describe(m.extractor, image, keypoints)
+    else
+        descriptors = fill(BitVector(), length(keypoints))
+    end
     add_keypoints_to_frame!(m, m.current_frame, keypoints, descriptors)
 end
 

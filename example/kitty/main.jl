@@ -82,7 +82,7 @@ end
 
 function replay(n_frames)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "02"
+    sequence = "05"
     stereo = false
 
     dataset = KittyDataset(base_dir, sequence; stereo)
@@ -97,7 +97,8 @@ function replay(n_frames)
     @assert length(saver.positions) == n_frames - 1
 
     resolution = (900, 600)
-    image_resolution = (1241, 376)
+    # image_resolution = (1241, 376)
+    image_resolution = (1226, 370)
     visualizer = Visualizer(;resolution, image_resolution)
     display(visualizer)
 
