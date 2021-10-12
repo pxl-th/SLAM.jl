@@ -1,4 +1,19 @@
-# NOTE: z is up
+"""
+Visualizer for the SLAM.
+
+Can be used to play in "live" mode as the SLAM is working
+or to replay from ReplaySaver.
+
+# Usage:
+
+To use it in "live" preview mode, pass it as a keyword argument,
+when creating SlamManager:
+
+```julia
+visualizer = Visualizer(;resolution=(900, 600), image_resolution=(370, 1226))
+SlamManager(params, camera; visualizer)
+```
+"""
 mutable struct Visualizer
     figure::Figure
 
@@ -18,6 +33,10 @@ mutable struct Visualizer
 end
 
 """
+```julia
+Visualizer(;resolution, image_resolution)
+```
+
 # Arguments:
 
 - `resolution`: Initial resolution of the figure in `(width, height)` format.
@@ -67,15 +86,40 @@ end
 
 Base.display(v::Visualizer) = Base.display(v.figure)
 
+"""
+```julia
+set_image!(v::Visualizer, image)
+```
+
+Update image in the visualizer.
+It should have the same dimensions as the original.
+"""
 function set_image!(v::Visualizer, image)
     v.image[] = copy!(v.image[], image)
 end
 
+"""
+```julia
+set_position!(v::Visualizer, position)
+```
+
+Add new position to the camera positions. This updates the plot immediately.
+"""
 function set_position!(v::Visualizer, position)
     v.positions[] = push!(v.positions[], position)
     autolimits!(v.map_axis)
 end
 
+"""
+```julia
+set_frame_wc!(v::Visualizer, frame_id, wc)
+```
+
+Add new frame `wc` to the visualizer queue.
+This is used when other threads are updating the visualizer.
+
+The queue is processed in `process_frame_wc!` method.
+"""
 function set_frame_wc!(v::Visualizer, frame_id, wc)
     lock(v.positions_lock) do
         base_position = SVector{4, Float64}(0, 0, 0, 1)
@@ -84,6 +128,13 @@ function set_frame_wc!(v::Visualizer, frame_id, wc)
     end
 end
 
+"""
+```julia
+process_frame_wc!(v::Visualizer)
+```
+
+Process pose queue. This updates the plot immediately.
+"""
 function process_frame_wc!(v::Visualizer)
     lock(v.positions_lock) do
         is_done = isempty(v.positions_queue)

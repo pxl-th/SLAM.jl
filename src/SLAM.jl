@@ -1,8 +1,8 @@
 module SLAM
 export SlamManager, add_image!, add_stereo_image!, get_queue_size
 export Params, Camera, run!, to_cartesian, reset!
-export Visualizer, ReplaySaver, set_frame_wc!, process_frame_wc!, set_image!
-export set_position!
+export Visualizer, ReplaySaver
+export set_frame_wc!, process_frame_wc!, set_image!, set_position!
 
 using BSON: @save, @load
 using OrderedCollections: OrderedSet, OrderedDict
