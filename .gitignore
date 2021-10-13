@@ -4,7 +4,6 @@ build/
 precompile.jl
 slam_precompile.jl
 
-Manifest.toml
 *.jpg
 *.png
 *.so
