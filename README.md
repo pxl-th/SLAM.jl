@@ -21,5 +21,5 @@ and has no restriction on the magnitude of the optical flow.
 ## Usage
 
 See [docs](https://pxl-th.github.io/SLAM.jl/dev/) for instructions
-or see [example/kitty/main.jl](https://github.com/pxl-th/SLAM.jl/tree/master/example/kitty)
+or [example/kitty/main.jl](https://github.com/pxl-th/SLAM.jl/tree/master/example/kitty/main.jl)
 for a full example on how to use.
