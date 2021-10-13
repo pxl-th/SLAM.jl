@@ -4,6 +4,8 @@
 
 Simultaneous Localization and Mapping.
 
+[[Video 1]](https://youtu.be/XLFdwK0FIYI)
+
 ![KITTY 05 sequence demo](res/kitty-05.gif)
 
 ## Install
