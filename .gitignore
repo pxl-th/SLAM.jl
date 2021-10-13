@@ -4,6 +4,4 @@ build/
 precompile.jl
 slam_precompile.jl
 
-*.jpg
-*.png
 *.so
