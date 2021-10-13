@@ -38,7 +38,8 @@ jobs:
             ${{ runner.os }}-test-${{ env.cache-name }}-
             ${{ runner.os }}-test-
             ${{ runner.os }}-
-      - uses: julia-actions/julia-buildpkg@v1
+      - run: sudo apt-get update && sudo apt-get install -y xorg-dev mesa-utils xvfb libgl1 freeglut3-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev
+      - run: DISPLAY=:0 xvfb-run -s '-screen 0 1024x768x24' julia --project=. -e 'import Pkg; Pkg.precompile()'
   docs:
     name: Documentation
     runs-on: ubuntu-latest
@@ -58,7 +59,7 @@ jobs:
             ${{ runner.os }}-test-
             ${{ runner.os }}-
       - run: sudo apt-get update && sudo apt-get install -y xorg-dev mesa-utils xvfb libgl1 freeglut3-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev
-      - uses: julia-actions/julia-buildpkg@v1
+      - run: DISPLAY=:0 xvfb-run -s '-screen 0 1024x768x24' julia --project=. -e 'import Pkg; Pkg.precompile()'
       - run: DISPLAY=:0 xvfb-run -s '-screen 0 1024x768x24' julia --project=. docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
