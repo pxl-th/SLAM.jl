@@ -66,9 +66,11 @@ Base.@kwdef mutable struct Params
     initial_parallax::Float64 = 20.0
     max_reprojection_error::Float64 = 3.0
     min_cov_score::Int64 = 25
-    filtering_ratio::Float64 = 0.9
     do_local_matching::Bool = false
+
+    filtering_ratio::Float64 = 0.9
     map_filtering::Bool = false
+
     do_local_bundle_adjustment::Bool = true
     max_projection_distance::Float64 = 2.0
     max_descriptor_distance::Float64 = 0.35

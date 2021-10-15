@@ -88,15 +88,23 @@ function run!(estimator::Estimator)
         if estimator.params.do_local_bundle_adjustment && new_kf.kfid ≥ 2
             lock(estimator.map_manager.optimization_lock)
             try
+                t1 = time()
                 local_bundle_adjustment!(estimator, new_kf)
-                estimator.params.map_filtering &&
-                    map_filtering!(estimator, new_kf)
+                t2 = time()
+                @debug "[ES] BA Time ($(t2 - t1) seconds)."
             catch e
                 showerror(stdout, e); println()
                 display(stacktrace(catch_backtrace())); println()
             finally
                 unlock(estimator.map_manager.optimization_lock)
             end
+        end
+
+        if estimator.params.map_filtering
+            t1 = time()
+            map_filtering!(estimator, new_kf)
+            t2 = time()
+            @debug "[ES] Map filtering ($(t2 - t1) seconds)."
         end
     end
     @debug "[ES] Exit required."
@@ -133,7 +141,6 @@ function get_new_kf!(estimator::Estimator)
         # TODO if more than 1 frame in queue, add them to ba anyway.
         estimator.new_kf_available = false
         kf = popfirst!(estimator.frame_queue)
-        @debug "[ES] Popping queue $(length(estimator.frame_queue)): $(kf.kfid)."
         kf
     end
 end
@@ -183,7 +190,6 @@ function _get_ba_parameters(
             mp_position = get_position(mp)
             map_points[kpid] = (mp_order_id, mp_position)
             push!(points_remap, kpid)
-            # @assert length(points_remap) == mp_order_id
 
             # For each observer, add observation: px ← (mp, pose).
             for ob_kfid in get_observers(mp)
@@ -217,7 +223,6 @@ function _get_ba_parameters(
 
                     push!(poses_remap, ob_kfid)
                     is_constant && push!(constant_poses, ob_kfid)
-                    # @assert length(poses_remap) == pose_order_id
                 end
 
                 push!(observations, Observation(
@@ -231,8 +236,6 @@ function _get_ba_parameters(
     n_observations = length(observations)
     n_poses, n_points = length(poses), length(map_points)
     point_shift = n_poses * 6
-    @debug "[ES] BA Covisibility: $(length(covisibility_map)):"
-    @debug "\t BA Poses: $n_poses | BA Points: $n_points | BA Obs: $n_observations"
 
     θ = Vector{Float64}(undef, point_shift + n_points * 3)
     θconst = Vector{Bool}(undef, n_poses)
@@ -334,8 +337,6 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     covisibility_map = OrderedDict{Int64, Int64}(
         kfid => covisibility_map[kfid] for kfid in co_kfids)
 
-    t1 = time()
-
     cache = _get_ba_parameters(
         estimator.map_manager, new_frame, covisibility_map,
         estimator.params.min_cov_score)
@@ -350,9 +351,6 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
     finally
         unlock(estimator.map_manager.map_lock)
     end
-
-    t2 = time()
-    @debug "[ES] BA Time: $(t2 - t1) seconds."
 
     estimator.params.local_ba_on = false
 end
@@ -385,7 +383,6 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
             lock(estimator.map_manager.map_lock) do
                 remove_keyframe!(estimator.map_manager, kfid)
             end
-            @debug "[ES] Removed KeyFrame $kfid."
             n_removed += 1
             continue
         end
@@ -410,7 +407,6 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
             lock(estimator.map_manager.map_lock) do
                 remove_keyframe!(estimator.map_manager, kfid)
             end
-            @debug "[ES] Removed KeyFrame $kfid."
             n_removed += 1
         end
     end

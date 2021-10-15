@@ -41,7 +41,6 @@ function run!(mapper::Mapper)
         new_keyframe = get_keyframe(mapper.map_manager, kf.id)
         new_keyframe ≡ nothing &&
             @error "[MP] Got invalid frame $(kf.id) from Map"
-        @debug "[MP] Get $(kf.id) KF"
 
         if mapper.params.stereo
             try
@@ -176,7 +175,6 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame, max_error)
         update_mappoint!(map_manager, kp.id, wpt)
         n_good += 1
     end
-    @debug "[MP] Stereo triangulation: $n_good Keypoints | $(frame.nb_3d_kpts)"
 end
 
 function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
@@ -255,7 +253,6 @@ function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
         update_mappoint!(map_manager, kp.id, wpt)
         good += 1
     end
-    @debug "[MP] Temporal triangulation: $good good KeyPoints."
 end
 
 """
@@ -465,7 +462,6 @@ function get_new_kf!(mapper::Mapper)
         end
 
         keyframe = popfirst!(mapper.keyframe_queue)
-        @debug "[MP] Popping queue $(length(mapper.keyframe_queue))"
         mapper.new_kf_available = !isempty(mapper.keyframe_queue)
         true, keyframe
     end
