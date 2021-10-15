@@ -155,7 +155,7 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame, max_error)
             (remove_mappoint_obs!(map_manager, kp.id, frame.kfid); continue)
         mp.is_3d && continue
 
-        left_point = triangulate_point(
+        left_point = triangulate(
             kp.undistorted_pixel[[2, 1]], kp.right_undistorted_pixel[[2, 1]],
             P1, P2)
         left_point *= 1.0 / left_point[4]
@@ -234,7 +234,7 @@ function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
         parallax = norm(
             obup .- project(frame.camera, rel_pose[1:3, 1:3] * kp.position))
 
-        left_point = triangulate_point(obup[[2, 1]], kpup[[2, 1]], P1, P2)
+        left_point = triangulate(obup[[2, 1]], kpup[[2, 1]], P1, P2)
         left_point *= 1.0 / left_point[4]
         left_point[3] < 0.1 && parallax > 20.0 && (remove_mappoint_obs!(
             map_manager, observer_kp.id, frame.kfid); continue)

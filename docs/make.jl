@@ -8,6 +8,7 @@ makedocs(
     modules=[SLAM],
     pages=[
         "Home" => "index.md",
+        "Tutorial" => "tutorial.md",
         "API Reference" => [
             "Slam Manager" => "api/slam-manager.md",
             "Front-End" => "api/front-end.md",

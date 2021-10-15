@@ -361,16 +361,4 @@ function draw_keypoints!(
     image
 end
 
-precompile(track!, (FrontEnd, Matrix{Float64}, Float64))
-precompile(track_mono!, (FrontEnd, Matrix{Float64}, Float64))
-precompile(compute_pose!, (FrontEnd,))
-precompile(compute_pose_5pt!, (FrontEnd,))
-
-precompile(run!, (Mapper,))
-precompile(triangulate_stereo!, (MapManager, Frame, Float64))
-precompile(triangulate_temporal!, (MapManager, Frame, Float64))
-
-precompile(run!, (Estimator,))
-precompile(local_bundle_adjustment!, (Estimator, Frame,))
-
 end

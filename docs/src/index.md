@@ -8,17 +8,6 @@ Simultaneous Localization and Mapping.
 - Bundle-Adjustment over a subset of Keyframes.
 - Local Map Matching for re-tracking lost Mappoints back into Frame.
 
-## Usage
-
-The system runs in 3 threads:
-
-- Slam Manager
-- Mapper
-- Estimator
-
-So you need to start Julia with at least `-t4` flag (+ 1 for the main thread).
-
-
 ## Install
 
 ```julia
@@ -57,9 +46,15 @@ manager.exit_required = true
 wait(manager_thread)
 ```
 
-## Examples
+For a more detailed explanation, see [Tutorial](@ref) section.
+If you prefer looking at raw code instead, look at a complete KITTY Dataset
+[example](https://github.com/pxl-th/SLAM.jl/tree/master/example/kitty).
 
-For a complete example, see [KITTY Dataset Example](https://github.com/pxl-th/SLAM.jl/tree/master/example/kitty).
+!!! warning
+
+    These are 3 components in the SLAM.jl that need to run on a separate
+    thread. So, remember to launch Julia with at least `-t4` flag
+    (+ 1 for the main thread).
 
 ## Results
 
