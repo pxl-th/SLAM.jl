@@ -56,7 +56,6 @@ function LKPyramid(image, levels; downsample = 2, σ = 1.0, gradients = true, re
         cache = LKCache(squared, filtered, gaussian_filtered)
 
         for (i, layer) in enumerate(pyramid)
-            # TODO in-place imgradients
             Iy[i], Ix[i] = imgradients(layer, KernelFactors.scharr, filling)
             level_size, level_type = size(Iy[i]), typeof(Iy[i])
 
@@ -80,10 +79,10 @@ function LKPyramid(image, levels; downsample = 2, σ = 1.0, gradients = true, re
 end
 
 function update!(lk::LKPyramid{G, C}, img; σ = 1.0) where {G <: AbstractVector, C}
-    filling = Fill(zero(eltype(lk.layers[begin])))
+    border = Fill(zero(eltype(lk.layers[begin])))
     gaussian_pyramid!(lk, img, σ)
     @inbounds for (i, layer) in enumerate(lk.layers)
-        lk.Iy[i], lk.Ix[i] = imgradients(layer, KernelFactors.scharr, filling)
+        imgradients_yx!(lk.Iy[i], lk.Ix[i], layer, border)
         if C ≡ Nothing
             compute_partial_derivatives!(
                 lk.Iyy[i], lk.Ixx[i], lk.Iyx[i], lk.Iy[i], lk.Ix[i])
@@ -96,6 +95,13 @@ function update!(lk::LKPyramid{G, C}, img; σ = 1.0) where {G <: AbstractVector,
     lk
 end
 update!(lk::LKPyramid{Nothing, Nothing}, img; σ = 1.0) = gaussian_pyramid!(lk.layers, img, σ)
+
+@inline function imgradients_yx!(Iy, Ix, image, border)
+    extended = (true, true)
+    imfilter!(Iy, image, KernelFactors.scharr(extended, 1), border)
+    imfilter!(Ix, image, KernelFactors.scharr(extended, 2), border)
+    Iy, Ix
+end
 
 @inline function get_kernel(σ, N)
     kerng = KernelFactors.IIRGaussian(σ)
