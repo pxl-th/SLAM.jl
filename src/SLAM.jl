@@ -7,10 +7,10 @@ export set_frame_wc!, process_frame_wc!, set_image!, set_position!
 using BSON: @save, @load
 using OrderedCollections: OrderedSet, OrderedDict
 using GLMakie
+using Interpolations
 using Images
 using ImageDraw
 using ImageFeatures
-using ImageTracking
 using LeastSquaresOptim
 using LinearAlgebra
 using Manifolds
@@ -67,6 +67,10 @@ function to_4x4(m, t)
         m[1, 3], m[2, 3], m[3, 3], 0,
         t[1],    t[2],    t[3],    1)
 end
+
+include("optical_flow/utils.jl")
+include("optical_flow/pyramid.jl")
+include("optical_flow/lucas_kanade.jl")
 
 include("camera.jl")
 include("extractor.jl")
@@ -197,7 +201,7 @@ function run!(sm::SlamManager)
     right_image::Union{Nothing, Matrix{Gray{Float64}}} = nothing
     time = 0.0
 
-    while !(sm.exit_required)
+    while !sm.exit_required
         if sm.params.stereo
             image, right_image, time = get_stereo_image!(sm)
         else
@@ -213,24 +217,22 @@ function run!(sm::SlamManager)
         sm.current_frame.time = time
         @debug "[SM] Frame $(sm.frame_id) @ $time."
 
-        is_kf_required = false
-        try
-            is_kf_required = track!(sm.front_end, image, time, sm.visualizer)
-        catch e
-            showerror(stdout, e); println()
-            display(stacktrace(catch_backtrace())); println()
-        end
-
+        is_kf_required = track!(sm.front_end, image, time, sm.visualizer)
         if sm.params.reset_required
             reset!(sm)
             continue
         end
 
         is_kf_required || continue
-        add_new_kf!(sm.mapper, KeyFrame(
-            sm.current_frame.kfid,
-            sm.params.stereo ? sm.front_end.current_pyramid : nothing,
-            sm.params.stereo ? right_image : nothing))
+        try
+            add_new_kf!(sm.mapper, KeyFrame(
+                sm.current_frame.kfid,
+                sm.params.stereo ? deepcopy(sm.front_end.current_pyramid) : nothing,
+                sm.params.stereo ? right_image : nothing))
+        catch e
+            showerror(stdout, e)
+            display(stacktrace(catch_backtrace()))
+        end
         sleep(1e-2)
     end
 
@@ -359,6 +361,57 @@ function draw_keypoints!(
         draw!(image, CirclePointRadius(to_cartesian(pixel), radius), color)
     end
     image
+end
+
+function test_pyr()
+    img = load("/home/pxl-th/Downloads/a.png") .|> Gray{Float64}
+    img_zero = rand(Gray{Float64}, size(img))
+
+    lk = LKPyramid(img, 3; reusable=true)
+    lk0 = LKPyramid(img_zero, 3; reusable=true)
+    eq_pyr(lk, LKPyramid(img, 3))
+    eq_pyr(lk0, LKPyramid(img_zero, 3))
+    neq_pyr(lk, lk0)
+
+    copy!(lk0, lk)
+    eq_pyr(lk0, lk)
+    neq_pyr(lk0, LKPyramid(img_zero, 3))
+    eq_pyr(lk0, LKPyramid(img, 3))
+
+    update!(lk, img_zero)
+    eq_pyr(lk, LKPyramid(img_zero, 3))
+    neq_pyr(lk, lk0)
+
+    update!(lk0, img_zero)
+    eq_pyr(lk0, lk)
+    eq_pyr(lk0, LKPyramid(img_zero, 3))
+
+    update!(lk0, img)
+    copy!(lk, lk0)
+    eq_pyr(lk, lk0)
+    eq_pyr(lk0, LKPyramid(img, 3))
+    eq_pyr(lk, LKPyramid(img, 3))
+end
+
+function eq_pyr(p1, p2)
+    for i in 1:length(p1.layers)
+        @assert all(p1.layers[i] .≈ p2.layers[i])
+        @assert all(p1.Ix[i] .≈ p2.Ix[i])
+        @assert all(p1.Iy[i] .≈ p2.Iy[i])
+        @assert all(p1.Iyy[i] .≈ p2.Iyy[i])
+        @assert all(p1.Ixx[i] .≈ p2.Ixx[i])
+        @assert all(p1.Iyx[i] .≈ p2.Iyx[i])
+    end
+end
+function neq_pyr(p1, p2)
+    for i in 1:length(p1.layers)
+        @assert !all(p1.layers[i] .≈ p2.layers[i])
+        @assert !all(p1.Ix[i] .≈ p2.Ix[i])
+        @assert !all(p1.Iy[i] .≈ p2.Iy[i])
+        @assert !all(p1.Iyy[i] .≈ p2.Iyy[i])
+        @assert !all(p1.Ixx[i] .≈ p2.Ixx[i])
+        @assert !all(p1.Iyx[i] .≈ p2.Iyx[i])
+    end
 end
 
 end

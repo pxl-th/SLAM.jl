@@ -15,9 +15,9 @@ It also decides when the system needs a new Keyframe in the map.
 - `params::Params`: Parameters of the system.
 - `current_image::Matrix{Gray{Float64}}`: Current image that is processed.
 - `previous_image::Matrix{Gray{Float64}}`: Previous processed image.
-- `current_pyramid::ImageTracking.LKPyramid`: Pre-computed pyramid
+- `current_pyramid::LKPyramid`: Pre-computed pyramid
     that is used for optical flow tracking for the `current_image`.
-- `previous_pyramid::ImageTracking.LKPyramid`: Pre-computed pyramid
+- `previous_pyramid::LKPyramid`: Pre-computed pyramid
     that is used for optical flow tracking for the `previous_image`.
 """
 mutable struct FrontEnd
@@ -29,14 +29,14 @@ mutable struct FrontEnd
     current_image::Matrix{Gray{Float64}}
     previous_image::Matrix{Gray{Float64}}
 
-    current_pyramid::ImageTracking.LKPyramid
-    previous_pyramid::ImageTracking.LKPyramid
+    current_pyramid::LKPyramid
+    previous_pyramid::LKPyramid
 end
 
 function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
-    empty_pyr = ImageTracking.LKPyramid(
+    empty_pyr = LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],
-        nothing, nothing, nothing, nothing, nothing)
+        nothing, nothing, nothing, nothing, nothing, nothing)
     FrontEnd(
         frame, MotionModel(), map_manager, params,
         Matrix{Gray{Float64}}(undef, 0, 0), Matrix{Gray{Float64}}(undef, 0, 0),
@@ -58,16 +58,9 @@ If it is the first image to be tracked, then Keyframe is always needed.
 """
 function track!(fe::FrontEnd, image, time, visualizer)
     is_kf_required = false
-
     lock(fe.map_manager.map_lock)
     try
         is_kf_required = track_mono!(fe, image, time, visualizer)
-        @debug "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
-
-        # vimage = RGB{Float64}.(fe.current_image)
-        # draw_keypoints!(vimage, fe.current_frame)
-        # save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
-
         is_kf_required && create_keyframe!(fe.map_manager, image)
     catch e
         showerror(stdout, e)
@@ -75,12 +68,16 @@ function track!(fe::FrontEnd, image, time, visualizer)
     finally
         unlock(fe.map_manager.map_lock)
     end
+
+    @debug "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
+    # vimage = RGB{Float64}.(fe.current_image)
+    # draw_keypoints!(vimage, fe.current_frame)
+    # Images.save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
     is_kf_required
 end
 
 function track_mono!(fe::FrontEnd, image, image_time, visualizer)
     preprocess!(fe, image)
-    # If it's the first frame, then KeyFrame is always needed.
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
     set_wc!(
@@ -111,18 +108,16 @@ function track_mono!(fe::FrontEnd, image, image_time, visualizer)
     # In case P3P fails this pose will be used.
     t1 = time()
     pose_5pt = compute_pose_5pt!(fe; min_parallax=5.0, use_motion_model=true)
-    t2 = time()
-    @debug "[FE] 5PT Pose ($(t2 - t1) sec)."
-
     fe.map_manager.nb_keyframes > 2 && pose_5pt ≢ nothing &&
         set_cw!(fe.current_frame, pose_5pt, visualizer)
+    t2 = time()
+    @debug "[FE] 5PT Pose ($(t2 - t1) sec)."
 
     t1 = time()
     compute_pose!(fe, visualizer)
     t2 = time()
     @debug "[FE] Compute Pose ($(t2 - t1) sec)."
 
-    # Update motion model from estimated pose.
     update!(fe.motion_model, fe.current_frame.wc, image_time)
     check_new_kf_required(fe)
 end
@@ -470,12 +465,21 @@ function compute_parallax(
 end
 
 function preprocess!(fe::FrontEnd, image)
+    t1 = time()
     fe.previous_image = fe.current_image
-    fe.previous_pyramid = fe.current_pyramid
-
-    fe.current_pyramid = ImageTracking.LKPyramid(
-        image, fe.params.pyramid_levels; σ=fe.params.pyramid_σ)
     fe.current_image = image
+
+    if has_gradients(fe.previous_pyramid) && has_gradients(fe.current_pyramid)
+        copy!(fe.previous_pyramid, fe.current_pyramid)
+        update!(fe.current_pyramid, fe.current_image)
+    else
+        fe.previous_pyramid = fe.current_pyramid
+        fe.current_pyramid = LKPyramid(
+            fe.current_image, fe.params.pyramid_levels;
+            σ=fe.params.pyramid_σ, reusable=true)
+    end
+    t2 = time()
+    @debug "[FE] Preprocess ($(t2 - t1) sec)."
 end
 
 """
@@ -519,7 +523,7 @@ reset!(fe::FrontEnd)
 Reset Front-End.
 """
 function reset!(fe::FrontEnd)
-    empty_pyr = ImageTracking.LKPyramid(
+    empty_pyr = LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],
         nothing, nothing, nothing, nothing, nothing)
     fe.previous_pyramid = empty_pyr

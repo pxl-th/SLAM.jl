@@ -1,6 +1,6 @@
 struct KeyFrame
     id::Int64
-    left_pyramid::Union{Nothing, ImageTracking.LKPyramid}
+    left_pyramid::Union{Nothing, LKPyramid{Vector{Matrix{Gray{Float64}}}, LKCache}}
     right_image::Union{Nothing, Matrix{Gray{Float64}}}
 end
 
@@ -11,6 +11,7 @@ mutable struct Mapper
 
     current_frame::Frame
     keyframe_queue::Vector{KeyFrame}
+    right_pyramid::LKPyramid
 
     exit_required::Bool
     new_kf_available::Bool
@@ -23,10 +24,13 @@ function Mapper(params::Params, map_manager::MapManager, frame::Frame)
     estimator = Estimator(map_manager, params)
     estimator_thread = Threads.@spawn run!(estimator)
     @debug "[MP] Launched estimator thread."
+    empty_pyr = LKPyramid(
+        [Matrix{Gray{Float64}}(undef, 0, 0)],
+        nothing, nothing, nothing, nothing, nothing, nothing)
 
     Mapper(
         params, map_manager, estimator,
-        frame, KeyFrame[], false, false,
+        frame, KeyFrame[], empty_pyr, false, false,
         estimator_thread, ReentrantLock())
 end
 
@@ -39,18 +43,21 @@ function run!(mapper::Mapper)
         end
 
         new_keyframe = get_keyframe(mapper.map_manager, kf.id)
-        new_keyframe ≡ nothing &&
-            @error "[MP] Got invalid frame $(kf.id) from Map"
+        new_keyframe ≡ nothing && @error "[MP] Got invalid frame $(kf.id) from Map"
 
         if mapper.params.stereo
             try
                 t1 = time()
-                right_pyramid = ImageTracking.LKPyramid(
-                    kf.right_image, mapper.params.pyramid_levels;
-                    σ=mapper.params.pyramid_σ)
+                if has_gradients(mapper.right_pyramid)
+                    update!(mapper.right_pyramid, kf.right_image)
+                else
+                    mapper.right_pyramid = LKPyramid(
+                        kf.right_image, mapper.params.pyramid_levels;
+                        σ=mapper.params.pyramid_σ, reusable=true)
+                end
                 optical_flow_matching!(
                     mapper.map_manager, new_keyframe,
-                    kf.left_pyramid, right_pyramid, true)
+                    kf.left_pyramid, mapper.right_pyramid, true)
                 t2 = time()
                 @debug "[MP] Stereo Matching ($(t2 - t1) sec): $(new_keyframe.nb_stereo_kpts) Keypoints"
             catch e
@@ -77,7 +84,7 @@ function run!(mapper::Mapper)
 
             # vimage = RGB{Float64}.(kf.right_image)
             # draw_keypoints!(vimage, new_keyframe; right=true)
-            # save("/home/pxl-th/projects/slam-data/images/frame-$(new_keyframe.id)-right.png", vimage)
+            # Images.save("/home/pxl-th/projects/slam-data/images/frame-$(new_keyframe.id)-right.png", vimage)
         end
 
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0

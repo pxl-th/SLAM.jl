@@ -454,16 +454,15 @@ or calibration pose (in stereo).
 - `map_manager::MapManager`: Map manager, used for retrieving parameters info,
     3D mappoints, removing mappoints.
 - `frame`: Frame for which to do matching.
-- `from_pyramid::ImageTracking.LKPyramid`: Pyramid from which to track.
-- `to_pyramid::ImageTracking.LKPyramid`: Pyramid to which to track.
+- `from_pyramid::LKPyramid`: Pyramid from which to track.
+- `to_pyramid::LKPyramid`: Pyramid to which to track.
 - `stereo::Bool`: Set to `true` if doing stereo matching. It will retrieve data
     using mutex and update `stereo` keypoints instead of regular keypoints.
     Otherwise set to `false`.
 """
 function optical_flow_matching!(
     map_manager::MapManager, frame::Frame,
-    from_pyramid::ImageTracking.LKPyramid,
-    to_pyramid::ImageTracking.LKPyramid, stereo,
+    from_pyramid::LKPyramid, to_pyramid::LKPyramid, stereo,
 )
     window_size = map_manager.params.window_size
     max_distance = map_manager.params.max_ktl_distance
