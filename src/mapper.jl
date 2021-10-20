@@ -12,6 +12,7 @@ mutable struct Mapper
     current_frame::Frame
     keyframe_queue::Vector{KeyFrame}
     right_pyramid::LKPyramid
+    geev_cache::GEEV4x4Cache
 
     exit_required::Bool
     new_kf_available::Bool
@@ -27,11 +28,10 @@ function Mapper(params::Params, map_manager::MapManager, frame::Frame)
     empty_pyr = LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],
         nothing, nothing, nothing, nothing, nothing, nothing)
-
     Mapper(
         params, map_manager, estimator,
-        frame, KeyFrame[], empty_pyr, false, false,
-        estimator_thread, ReentrantLock())
+        frame, KeyFrame[], empty_pyr, GEEV4x4Cache(),
+        false, false, estimator_thread, ReentrantLock())
 end
 
 function run!(mapper::Mapper)
@@ -71,7 +71,7 @@ function run!(mapper::Mapper)
                     t1 = time()
                     triangulate_stereo!(
                         mapper.map_manager, new_keyframe,
-                        mapper.params.max_reprojection_error)
+                        mapper.params.max_reprojection_error, mapper.geev_cache)
                     t2 = time()
                     @debug "[MP] Stereo Triangulation ($(t2 - t1) sec)."
                 catch e
@@ -93,7 +93,7 @@ function run!(mapper::Mapper)
                 t1 = time()
                 triangulate_temporal!(
                     mapper.map_manager, new_keyframe,
-                    mapper.params.max_reprojection_error)
+                    mapper.params.max_reprojection_error, mapper.geev_cache)
                 t2 = time()
                 @debug "[MP] Temporal Triangulation ($(t2 - t1) sec)."
             catch e
@@ -143,7 +143,9 @@ function run!(mapper::Mapper)
     wait(mapper.estimator_thread)
 end
 
-function triangulate_stereo!(map_manager::MapManager, frame::Frame, max_error)
+function triangulate_stereo!(
+    map_manager::MapManager, frame::Frame, max_error, cache::GEEV4x4Cache,
+)
     stereo_keypoints = get_stereo_keypoints(frame)
     if isempty(stereo_keypoints)
         @warn "[MP] No stereo keypoints to triangulate."
@@ -163,7 +165,7 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame, max_error)
 
         left_point = triangulate(
             kp.undistorted_pixel[[2, 1]], kp.right_undistorted_pixel[[2, 1]],
-            P1, P2)
+            P1, P2, cache)
         left_point *= 1.0 / left_point[4]
         left_point[3] < 0.1 && (remove_stereo_keypoint!(frame, kp.id); continue)
 
@@ -184,7 +186,9 @@ function triangulate_stereo!(map_manager::MapManager, frame::Frame, max_error)
     end
 end
 
-function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
+function triangulate_temporal!(
+    map_manager::MapManager, frame::Frame, max_error, cache::GEEV4x4Cache,
+)
     keypoints = get_2d_keypoints(frame)
     if isempty(keypoints)
         @warn "[MP] No 2D keypoints to triangulate."
@@ -239,7 +243,7 @@ function triangulate_temporal!(map_manager::MapManager, frame::Frame, max_error)
         parallax = norm(
             obup .- project(frame.camera, rel_pose[1:3, 1:3] * kp.position))
 
-        left_point = triangulate(obup[[2, 1]], kpup[[2, 1]], P1, P2)
+        left_point = triangulate(obup[[2, 1]], kpup[[2, 1]], P1, P2, cache)
         left_point *= 1.0 / left_point[4]
         left_point[3] < 0.1 && parallax > 20.0 && (remove_mappoint_obs!(
             map_manager, observer_kp.id, frame.kfid); continue)

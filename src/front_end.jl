@@ -31,6 +31,7 @@ mutable struct FrontEnd
 
     current_pyramid::LKPyramid
     previous_pyramid::LKPyramid
+    geev_cache::GEEV4x4Cache
 end
 
 function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
@@ -40,7 +41,7 @@ function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
     FrontEnd(
         frame, MotionModel(), map_manager, params,
         Matrix{Gray{Float64}}(undef, 0, 0), Matrix{Gray{Float64}}(undef, 0, 0),
-        empty_pyr, empty_pyr)
+        empty_pyr, empty_pyr, GEEV4x4Cache())
 end
 
 """
@@ -309,7 +310,7 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
     # `P` is `cw`: transforms from world (previous frame) to current frame.
     n_inliers, (_, P, inliers, _) = five_point_ransac(
         previous_points, current_points,
-        fe.current_frame.camera.K, fe.current_frame.camera.K;
+        fe.current_frame.camera.K, fe.current_frame.camera.K, fe.geev_cache;
         max_repr_error=fe.params.max_reprojection_error)
     if n_inliers < 5
         @warn "[FE] Not enough inliers ($n_inliers) for the " *
