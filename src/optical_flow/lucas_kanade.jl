@@ -111,8 +111,7 @@ function compute_partial_derivatives!(
     squared = typeof(Iy)(undef, size(Iy)),
     filtered = typeof(Iy)(undef, size(Iy)), σ = 4.0,
 )
-    kernel = KernelFactors.gaussian(σ)
-    kernel_factors = kernelfactors((kernel, kernel))
+    kernel_factors = get_kernel(σ, 2)
 
     squared .= Iy .* Iy
     imfilter!(filtered, squared, kernel_factors)
