@@ -7,7 +7,7 @@ include("kitty.jl")
 
 function main(n_frames)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "00"
+    sequence = "02"
     stereo = true
 
     dataset = KittyDataset(base_dir, sequence; stereo)
@@ -83,7 +83,7 @@ end
 
 function replay(n_frames)
     base_dir = "/home/pxl-th/Downloads/kitty-dataset/"
-    sequence = "00"
+    sequence = "02"
 
     dataset = KittyDataset(base_dir, sequence; stereo=false)
     println(dataset)

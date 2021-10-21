@@ -269,6 +269,8 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
 
     previous_points = Vector{Point2f}(undef, fe.current_frame.nb_keypoints)
     current_points = Vector{Point2f}(undef, fe.current_frame.nb_keypoints)
+    previous_pd = Vector{Point2f}(undef, fe.current_frame.nb_keypoints)
+    current_pd = Vector{Point2f}(undef, fe.current_frame.nb_keypoints)
     kp_ids = Vector{Int64}(undef, fe.current_frame.nb_keypoints)
     i = 1
 
@@ -280,6 +282,8 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
         # Convert points to `(x, y)` format as expected by five points.
         previous_points[i] = pkf_keypoint.undistorted_pixel[[2, 1]]
         current_points[i] = keypoint.undistorted_pixel[[2, 1]]
+        previous_pd[i] = pkf_keypoint.position[[1, 2]]
+        current_pd[i] = keypoint.position[[1, 2]]
         kp_ids[i] = keypoint.id
         i += 1
 
@@ -305,11 +309,13 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
     i -= 1
     previous_points = @view(previous_points[1:i])
     current_points = @view(current_points[1:i])
+    previous_pd = @view(previous_pd[1:i])
+    current_pd = @view(current_pd[1:i])
     kp_ids = @view(kp_ids[1:i])
 
     # `P` is `cw`: transforms from world (previous frame) to current frame.
     n_inliers, (_, P, inliers, _) = five_point_ransac(
-        previous_points, current_points,
+        previous_points, current_points, previous_pd, current_pd,
         fe.current_frame.camera.K, fe.current_frame.camera.K, fe.geev_cache;
         max_repr_error=fe.params.max_reprojection_error)
     if n_inliers < 5

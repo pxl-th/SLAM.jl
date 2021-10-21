@@ -117,7 +117,8 @@ function gaussian_pyramid!(pyramid::P, img, kernel) where P <: AbstractVector
     scale = 2
     @inbounds copy!(pyramid[1], img)
     @inbounds for _ in 1:(length(pyramid) - 1)
-        tmp = imfilter(pyramid[scale - 1], kernel, NA())
+        # tmp = imfilter(pyramid[scale - 1], kernel, NA())
+        tmp = imfilter(pyramid[scale - 1], kernel)
         ImageTransformations.imresize!(
             pyramid[scale], interpolate!(tmp, BSpline(Linear())))
         scale += 1
@@ -129,7 +130,7 @@ function gaussian_pyramid!(pyramid::P, filtered, img, kernel) where P <: Abstrac
     @inbounds copy!(pyramid[1], img)
     @inbounds for _ in 1:(length(pyramid) - 1)
         tmp = filtered[scale - 1]
-        imfilter!(tmp, pyramid[scale - 1], kernel, NA())
+        imfilter!(tmp, pyramid[scale - 1], kernel)
         ImageTransformations.imresize!(
             pyramid[scale], interpolate!(tmp, BSpline(Linear())))
         scale += 1
