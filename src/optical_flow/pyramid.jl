@@ -79,10 +79,9 @@ function LKPyramid(image, levels; downsample = 2, σ = 1.0, gradients = true, re
 end
 
 function update!(lk::LKPyramid{G, C}, img; σ = 1.0) where {G <: AbstractVector, C}
-    border = Fill(zero(eltype(lk.layers[begin])))
     gaussian_pyramid!(lk, img, σ)
     @inbounds for (i, layer) in enumerate(lk.layers)
-        imgradients_yx!(lk.Iy[i], lk.Ix[i], layer, border)
+        imgradients_yx!(lk.Iy[i], lk.Ix[i], layer)
         if C ≡ Nothing
             compute_partial_derivatives!(
                 lk.Iyy[i], lk.Ixx[i], lk.Iyx[i], lk.Iy[i], lk.Ix[i])
@@ -96,10 +95,10 @@ function update!(lk::LKPyramid{G, C}, img; σ = 1.0) where {G <: AbstractVector,
 end
 update!(lk::LKPyramid{Nothing, Nothing}, img; σ = 1.0) = gaussian_pyramid!(lk.layers, img, σ)
 
-@inline function imgradients_yx!(Iy, Ix, image, border)
+@inline function imgradients_yx!(Iy, Ix, image)
     extended = (true, true)
-    imfilter!(Iy, image, KernelFactors.scharr(extended, 1), border)
-    imfilter!(Ix, image, KernelFactors.scharr(extended, 2), border)
+    imfilter!(Iy, image, KernelFactors.scharr(extended, 1))
+    imfilter!(Ix, image, KernelFactors.scharr(extended, 2))
     Iy, Ix
 end
 
@@ -117,7 +116,6 @@ function gaussian_pyramid!(pyramid::P, img, kernel) where P <: AbstractVector
     scale = 2
     @inbounds copy!(pyramid[1], img)
     @inbounds for _ in 1:(length(pyramid) - 1)
-        # tmp = imfilter(pyramid[scale - 1], kernel, NA())
         tmp = imfilter(pyramid[scale - 1], kernel)
         ImageTransformations.imresize!(
             pyramid[scale], interpolate!(tmp, BSpline(Linear())))

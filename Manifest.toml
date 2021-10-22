@@ -1225,7 +1225,7 @@ version = "1.1.2"
 
 [[deps.RecoverPose]]
 deps = ["BenchmarkTools", "Documenter", "LinearAlgebra", "MultivariatePolynomials", "Polynomials", "ProfileView", "Random", "Revise", "Rotations", "RowEchelon", "StaticArrays", "Statistics", "TypedPolynomials"]
-git-tree-sha1 = "be0aae90fa5dd1d20bfbcd66a2b3cd0fdb6631bb"
+git-tree-sha1 = "98cd108a2b117228f46cfa2fc91b6171985b7df6"
 repo-rev = "master"
 repo-url = "https://github.com/pxl-th/RecoverPose.jl.git"
 uuid = "4c983967-3530-4695-9d8b-d2465029e2f3"
