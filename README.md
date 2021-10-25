@@ -12,11 +12,8 @@ Simultaneous Localization and Mapping.
 ## Install
 
 ```bash
-]add https://github.com/pxl-th/RecoverPose.jl.git
 ]add https://github.com/pxl-th/SLAM.jl.git
 ```
-
-[RecoverPose.jl](https://github.com/pxl-th/RecoverPose.jl) contains functions for computing poses and triangulation methods.
 
 ## Usage
 
