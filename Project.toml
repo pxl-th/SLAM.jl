@@ -30,6 +30,7 @@ SparseDiffTools = "47a9eef4-7e08-11e9-0b38-333d64bd3804"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
+ImageFeatures = "0.4"
 Interpolations = "0.13"
 Documenter = "0.27"
 LeastSquaresOptim = "0.8"
