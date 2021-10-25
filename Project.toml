@@ -31,3 +31,8 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 ImageFiltering = "0.7"
+ImageDraw = "0.2"
+GeometryBasics = "0.4"
+Rotations = "1"
+ImageMagick = "1"
+RecoverPose = "0.1"
