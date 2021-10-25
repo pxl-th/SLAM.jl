@@ -31,3 +31,11 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 LeastSquaresOptim = "0.8"
+OrderedCollections = "1"
+StaticArrays = "1"
+ImageFiltering = "0.7"
+ImageDraw = "0.2"
+GeometryBasics = "0.4"
+Rotations = "1"
+ImageMagick = "1"
+RecoverPose = "0.1"
