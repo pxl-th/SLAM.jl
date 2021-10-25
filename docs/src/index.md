@@ -42,6 +42,21 @@ For a more detailed explanation, see [Tutorial](@ref) section.
 If you prefer looking at raw code instead, look at a complete KITTY Dataset
 [example](https://github.com/pxl-th/SLAM.jl/tree/master/example/kitty).
 
+To launch the example, download KITTY Dataset,
+change `base_dir` and `save_dir` to you own (`base_dir` should be the root
+directory of KITTY dataset folder) and launch in from the REPL:
+
+```julia
+include("./example/kitty/main.jl")
+
+# Launch SLAM
+n_frames = 100
+slam_manager, visualizer = main(n_frames)
+
+# Replay saved result
+replay(n_frames)
+```
+
 !!! warning
 
     These are 3 components in the SLAM.jl that need to run on a separate
