@@ -1,12 +1,11 @@
 module SLAM
 export SlamManager, add_image!, add_stereo_image!, get_queue_size
 export Params, Camera, run!, to_cartesian, reset!
-export Visualizer, ReplaySaver
-export set_frame_wc!, process_frame_wc!, set_image!, set_position!
+export ReplaySaver
+export set_frame_wc!, set_image!, set_position!
 
 using BSON: @save, @load
 using OrderedCollections: OrderedSet, OrderedDict
-using GLMakie
 using Interpolations
 using Images
 using ImageDraw
@@ -83,7 +82,6 @@ include("map_manager.jl")
 include("front_end.jl")
 include("estimator.jl")
 include("mapper.jl")
-include("io/visualizer.jl")
 include("io/saver.jl")
 include("bundle_adjustment.jl")
 
@@ -141,7 +139,7 @@ mutable struct SlamManager
     mapper::Mapper
     extractor::Extractor
 
-    visualizer::Union{Nothing, Visualizer, ReplaySaver}
+    visualizer::Union{Nothing, ReplaySaver}
 
     exit_required::Bool
 
@@ -362,5 +360,10 @@ function draw_keypoints!(
     end
     image
 end
+
+# let
+#     pyr = LKPyramid(rand(Gray{Float64}, 28, 28), 2; reusable=true)
+#     update!(pyr, rand(Gray{Float64}, 28, 28))
+# end
 
 end
