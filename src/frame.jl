@@ -365,19 +365,31 @@ function remove_stereo_keypoint!(f::Frame, kpid)
     end
 end
 
-function set_wc!(f::Frame, wc, visualizer = nothing)
+function set_wc!(f::Frame, wc, ::Nothing)
     lock(f.pose_lock) do
         f.wc = wc
         f.cw = inv(SE3, wc)
-        visualizer ≢ nothing && set_frame_wc!(visualizer, f.id, f.wc)
+    end
+end
+function set_wc!(f::Frame, wc, slam_io::V) where V <: SLAMIO
+    lock(f.pose_lock) do
+        f.wc = wc
+        f.cw = inv(SE3, wc)
+        set_frame_wc!(slam_io, f.id, f.wc)
     end
 end
 
-function set_cw!(f::Frame, cw, visualizer = nothing)
+function set_cw!(f::Frame, cw, ::Nothing)
     lock(f.pose_lock) do
         f.cw = cw
         f.wc = inv(SE3, cw)
-        visualizer ≢ nothing && set_frame_wc!(visualizer, f.id, f.wc)
+    end
+end
+function set_cw!(f::Frame, cw, slam_io::V) where V <: SLAMIO
+    lock(f.pose_lock) do
+        f.cw = cw
+        f.wc = inv(SE3, cw)
+        set_frame_wc!(slam_io, f.id, f.wc)
     end
 end
 

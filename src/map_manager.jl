@@ -1,12 +1,10 @@
 """
-```julia
-MapManager(params::Params, frame::Frame, extractor::Extractor)
-```
+    MapManager(params::Params, frame::Frame, extractor::Extractor)
 
 Map Manager is responsible for managing Keyframes in the map
 as well as Mappoints.
 
-# Arguments:
+# Arguments
 
 - `current_frame::Frame`: Current frame that is shared throughout
     all the components in the system.
@@ -256,9 +254,7 @@ function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
 end
 
 """
-```julia
-update_mappoint!(m::MapManager, mpid, new_position)
-```
+    update_mappoint!(m::MapManager, mpid, new_position)
 
 Update position of a MapPoint.
 """
@@ -296,9 +292,7 @@ function update_mappoint!(m::MapManager, mpid, new_position)
 end
 
 """
-```julia
-update_frame_covisibility!(map_manager::MapManager, frame::Frame)
-```
+    update_frame_covisibility!(map_manager::MapManager, frame::Frame)
 
 Update covisibility graph for the `frame`.
 This is done by going through all of the keypoints in the `frame`.
@@ -361,9 +355,7 @@ function update_frame_covisibility!(map_manager::MapManager, frame::Frame)
 end
 
 """
-```julia
-reset!(m::MapManager)
-```
+    reset!(m::MapManager)
 
 Reset map manager.
 """
@@ -378,9 +370,7 @@ function reset!(m::MapManager)
 end
 
 """
-```julia
-merge_mappoints(m::MapManager, prev_id, new_id)
-```
+    merge_mappoints(m::MapManager, prev_id, new_id)
 
 Merge `prev_id` Mappoint into `new_id` Mappoint.
 For "previous" observers, update mappoint and keypoint to the new.
@@ -437,9 +427,7 @@ function merge_mappoints(m::MapManager, prev_id, new_id)
 end
 
 """
-```julia
-optical_flow_matching!(map_manager, frame, from_pyramid, to_pyramid, stereo)
-```
+    optical_flow_matching!(map_manager, frame, from_pyramid, to_pyramid, stereo)
 
 Match keypoints in `frame` from `from_pyramid` to `to_pyramid`.
 This function is used when matching keypoints temporally from previous frame
@@ -579,17 +567,15 @@ function optical_flow_matching!(
 end
 
 """
-```julia
-maybe_stereo_update!(
-    frame::Frame, kpid, new_position::Point2f; epipolar_error::Float64 = 2.0,
-)
-```
+    maybe_stereo_update!(
+        frame::Frame, kpid, new_position::Point2f; epipolar_error::Float64 = 2.0,
+    )
 
 Update stereo keypoint if the vertical distance between matched keypoints is
 less than `epipolar_error`. In this case, set y-coordinate equal
 to the left keypoint. Otherwise do nothing.
 
-# Returns:
+# Returns
 
 `true` if successfully updated, otherwise `false`.
 """

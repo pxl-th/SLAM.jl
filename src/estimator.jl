@@ -43,7 +43,7 @@ end
 Estimator is responsible for performing Bundle-Adjustment procedure
 and map filtering that removes low-information Keyframes from the map.
 
-# Arguments:
+# Arguments
 
 - `map_manager::MapManager`: Map manager with all the map information.
 - `params::Params`: Parameters of the system.
@@ -71,9 +71,7 @@ function Estimator(map_manager::MapManager, params::Params)
 end
 
 """
-```julia
-run!(estimator::Estimator)
-```
+    run!(estimator::Estimator)
 
 Main routine that starts Estimator.
 """
@@ -111,9 +109,7 @@ function run!(estimator::Estimator)
 end
 
 """
-```julia
-add_new_kf!(estimator::Estimator, frame::Frame)
-```
+    add_new_kf!(estimator::Estimator, frame::Frame)
 
 Add `frame` to the Estimator queue to be processed.
 """
@@ -125,9 +121,7 @@ function add_new_kf!(estimator::Estimator, frame::Frame)
 end
 
 """
-```julia
-get_new_kf!(estimator::Estimator)
-```
+    get_new_kf!(estimator::Estimator)
 
 Get `frame` from the queue if it is available.
 """
@@ -311,9 +305,7 @@ function _update_ba_parameters!(
 end
 
 """
-```julia
-local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
-```
+    local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
 
 Perform Bundle-Adjustment on the new frame and its covisibility graph.
 
@@ -356,9 +348,7 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
 end
 
 """
-```julia
-map_filtering!(estimator::Estimator, new_keyframe::Frame)
-```
+    map_filtering!(estimator::Estimator, new_keyframe::Frame)
 
 Filter out KeyFrames that share too many MapPoints with other KeyFrames
 in the covisibility graph. Since they are not informative.
@@ -414,9 +404,7 @@ function map_filtering!(estimator::Estimator, new_keyframe::Frame)
 end
 
 """
-```julia
-reset!(estimator::Estimator)
-```
+    reset!(estimator::Estimator)
 
 Reset Estimator.
 """

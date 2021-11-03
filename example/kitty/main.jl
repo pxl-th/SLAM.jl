@@ -1,6 +1,3 @@
-using BSON: @save, @load
-using GeometryBasics
-using GLMakie
 using SLAM
 
 include("kitty.jl")
@@ -33,11 +30,7 @@ function main(n_frames)
         do_local_bundle_adjustment=false, map_filtering=true)
 
     saver = ReplaySaver()
-    visualizer = nothing
-    # visualizer = Visualizer((900, 600))
-    # display(visualizer)
-
-    slam_manager = SlamManager(params, camera; right_camera, visualizer=saver)
+    slam_manager = SlamManager(params, camera; right_camera, slam_io=saver)
     slam_manager_thread = Threads.@spawn run!(slam_manager)
 
     t1 = time()
@@ -51,11 +44,6 @@ function main(n_frames)
             add_stereo_image!(slam_manager, left_frame, right_frame, timestamp)
         else
             add_image!(slam_manager, left_frame, timestamp)
-        end
-
-        if visualizer ≢ nothing
-            SLAM.set_image!(visualizer, rotr90(left_frame))
-            process_frame_wc!(visualizer)
         end
 
         q_size = get_queue_size(slam_manager)
@@ -78,7 +66,7 @@ function main(n_frames)
     @info "SLAM took: $(t2 - t1) seconds."
 
     SLAM.save(saver, save_dir)
-    slam_manager, visualizer
+    slam_manager
 end
 
 function replay(n_frames)
