@@ -40,8 +40,7 @@ function bundle_adjustment!(
 
     Y1 = optimize!(
         LeastSquaresProblem(θ0, Y, residue!, sparsity, g!), optimizer;
-        iterations=5, show_trace,
-    )
+        iterations=5, show_trace)
     θ1 = Y1.minimizer
     n_outliers = _ba_detect_outliers!(cache, θ1, camera; repr_ϵ)
     @debug "BA N Outliers $n_outliers."
@@ -51,8 +50,7 @@ function bundle_adjustment!(
 
     Y2 = optimize!(
         LeastSquaresProblem(θ1, Y, residue!, sparsity2, g2!), optimizer;
-        iterations, show_trace,
-    )
+        iterations, show_trace)
     copy!(cache.θ, Y2.minimizer)
 end
 

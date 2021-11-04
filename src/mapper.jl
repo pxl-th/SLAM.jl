@@ -81,10 +81,6 @@ function run!(mapper::Mapper)
                     unlock(mapper.map_manager.map_lock)
                 end
             end
-
-            # vimage = RGB{Float64}.(kf.right_image)
-            # draw_keypoints!(vimage, new_keyframe; right=true)
-            # Images.save("/home/pxl-th/projects/slam-data/images/frame-$(new_keyframe.id)-right.png", vimage)
         end
 
         if new_keyframe.nb_2d_kpts > 0 && new_keyframe.kfid > 0

@@ -1,12 +1,10 @@
 module SLAM
 export SlamManager, add_image!, add_stereo_image!, get_queue_size
 export Params, Camera, run!, to_cartesian, reset!
-export Visualizer, ReplaySaver
-export set_frame_wc!, process_frame_wc!, set_image!, set_position!
+export ReplaySaver, set_frame_wc!
 
 using BSON: @save, @load
 using OrderedCollections: OrderedSet, OrderedDict
-using GLMakie
 using Interpolations
 using Images
 using ImageDraw
@@ -47,26 +45,28 @@ Params:
 end
 
 function to_4x4(m::SMatrix{3, 3, T, 9}) where T
-    SMatrix{4, 4, T}(
+    @inbounds SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
         0,       0,       0,       1)
 end
 function to_4x4(m::SMatrix{3, 4, T, 12}) where T
-    SMatrix{4, 4, T}(
+    @inbounds SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
         m[1, 4], m[2, 4], m[3, 4], 1)
 end
 function to_4x4(m, t)
-    SMatrix{4, 4, Float64}(
+    @inbounds SMatrix{4, 4, Float64}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
         t[1],    t[2],    t[3],    1)
 end
+
+abstract type SLAMIO end
 
 include("optical_flow/utils.jl")
 include("optical_flow/pyramid.jl")
@@ -83,17 +83,11 @@ include("map_manager.jl")
 include("front_end.jl")
 include("estimator.jl")
 include("mapper.jl")
-include("io/visualizer.jl")
 include("io/saver.jl")
 include("bundle_adjustment.jl")
 
 """
-```julia
-SlamManager(
-    params::Params, camera::Camera;
-    right_camera::Union{Nothing, Camera} = nothing,
-)
-```
+    SlamManager(params, camera; right_camera = nothing, slam_io = nothing)
 
 Slam Manager that is the highest level component in the system.
 It is responsible for sending new frames to the other components
@@ -126,7 +120,7 @@ in the separate thread.
 - `exit_required::Bool`: Set it to `true` to stop SlamManager
     once it is launched.
 """
-mutable struct SlamManager
+mutable struct SlamManager{V}
     params::Params
 
     image_queue::Vector{Matrix{Gray{Float64}}}
@@ -141,17 +135,14 @@ mutable struct SlamManager
     mapper::Mapper
     extractor::Extractor
 
-    visualizer::Union{Nothing, Visualizer, ReplaySaver}
-
+    slam_io::V
     exit_required::Bool
 
     mapper_thread
     image_lock::ReentrantLock
 end
 
-function SlamManager(
-    params, camera; right_camera = nothing, visualizer = nothing,
-)
+function SlamManager(params, camera; right_camera = nothing, slam_io = nothing)
     params.stereo && right_camera ≡ nothing &&
         error("[SM] Provide `right_camera` when in stereo mode.")
 
@@ -179,14 +170,11 @@ function SlamManager(
         params, image_queue, right_image_queue,
         time_queue, frame, frame.id,
         front_end, map_manager, mapper, extractor,
-        visualizer,
-        false, mapper_thread, ReentrantLock())
+        slam_io, false, mapper_thread, ReentrantLock())
 end
 
 """
-```julia
-run!(sm::SlamManager)
-```
+    run!(sm::SlamManager)
 
 Main routine for the SlamManager. It runs until `exit_required` variable
 is set to `true`. After that, it will end its work, wait for other threads
@@ -217,7 +205,7 @@ function run!(sm::SlamManager)
         sm.current_frame.time = time
         @debug "[SM] Frame $(sm.frame_id) @ $time."
 
-        is_kf_required = track!(sm.front_end, image, time, sm.visualizer)
+        is_kf_required = track!(sm.front_end, image, time, sm.slam_io)
         if sm.params.reset_required
             reset!(sm)
             continue
@@ -242,9 +230,7 @@ function run!(sm::SlamManager)
 end
 
 """
-```julia
-add_image!(sm::SlamManager, image, time)
-```
+    add_image!(sm::SlamManager, image, time)
 
 Add monocular image and its timestamp to the queue.
 """
@@ -257,9 +243,7 @@ function add_image!(sm::SlamManager, image, time)
 end
 
 """
-```julia
-add_stereo_image!(sm::SlamManager, image, right_image, time)
-```
+    add_stereo_image!(sm::SlamManager, image, right_image, time)
 
 Add stereo image and its timestamp to the queue.
 """
@@ -273,9 +257,7 @@ function add_stereo_image!(sm::SlamManager, image, right_image, time)
 end
 
 """
-```julia
-get_image!(sm::SlamManager)
-```
+    get_image!(sm::SlamManager)
 
 Get monocular image and its timestamp from the queue.
 
@@ -294,9 +276,7 @@ function get_image!(sm::SlamManager)
 end
 
 """
-```julia
-get_stereo_image!(sm::SlamManager)
-```
+    get_stereo_image!(sm::SlamManager)
 
 Get stereo image and its timestamp from the queue.
 
@@ -318,9 +298,7 @@ function get_stereo_image!(sm::SlamManager)
 end
 
 """
-```julia
-get_queue_size(sm::SlamManager)
-```
+    get_queue_size(sm::SlamManager)
 
 Get size of the queue of images to be processed.
 """
@@ -331,9 +309,7 @@ function get_queue_size(sm::SlamManager)
 end
 
 """
-```julia
-reset!(sm::SlamManager)
-```
+    reset!(sm::SlamManager)
 
 Reset slam manager, front-end and map_manager.
 """
@@ -344,23 +320,6 @@ function reset!(sm::SlamManager)
     sm.front_end |> reset!
     sm.map_manager |> reset!
     @warn "[Slam Manager] Reset applied."
-end
-
-function draw_keypoints!(
-    image::Matrix{T}, frame::Frame; right::Bool = false,
-) where T <: RGB
-    radius = 2
-    for kp in values(frame.keypoints)
-        right && !kp.is_stereo && continue
-
-        pixel = (right && kp.is_stereo) ? kp.right_pixel : kp.pixel
-        in_image(frame.camera, pixel) || continue
-
-        color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
-        kp.is_retracked && (color = T(1, 0, 0);)
-        draw!(image, CirclePointRadius(to_cartesian(pixel), radius), color)
-    end
-    image
 end
 
 end

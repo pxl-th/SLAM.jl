@@ -1,7 +1,5 @@
 """
-```julia
-ReplaySaver()
-```
+    ReplaySaver()
 
 ReplaySaver is used to save/load SLAM result for the visualizer.
 If added to the SlamManager instead of the visualizer, it accumulates
@@ -26,7 +24,7 @@ Then you can load it from the save directory and use it to replay results.
 SLAM.load!(saver, "save_dir")
 ```
 """
-mutable struct ReplaySaver
+mutable struct ReplaySaver <: SLAMIO
     ids::Dict{Int64, Int64} # frame id -> position id
     positions::Vector{Point3f0}
 
@@ -36,9 +34,7 @@ end
 ReplaySaver() = ReplaySaver(Dict{Int64, Int64}(), Point3f0[], ReentrantLock())
 
 """
-```julia
-set_frame_wc!(saver::ReplaySaver, frame_id, wc)
-```
+    set_frame_wc!(saver::ReplaySaver, frame_id, wc)
 
 Add new pose to store.
 """
@@ -58,9 +54,7 @@ function set_frame_wc!(saver::ReplaySaver, frame_id, wc)
 end
 
 """
-```julia
-save(saver::ReplaySaver, save_dir)
-```
+    save(saver::ReplaySaver, save_dir)
 
 Save results into the given directory.
 """
@@ -77,9 +71,7 @@ function save(saver::ReplaySaver, save_dir)
 end
 
 """
-```julia
-load!(saver::ReplaySaver, save_dir)
-```
+    load!(saver::ReplaySaver, save_dir)
 
 Load results from a given directory.
 """

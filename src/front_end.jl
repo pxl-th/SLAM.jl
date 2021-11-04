@@ -3,7 +3,7 @@ Front-End is responsible for tracking keypoints
 and computing poses for the Frames.
 It also decides when the system needs a new Keyframe in the map.
 
-# Parameters:
+# Parameters
 
 - `current_frame::Frame`: Current frame that is being processed.
     This is a shared Frame between FrontEnd, MapManager, Estimator
@@ -45,15 +45,13 @@ function FrontEnd(params::Params, frame::Frame, map_manager::MapManager)
 end
 
 """
-```julia
-track!(fe::FrontEnd, image, time)
-```
+    track!(fe::FrontEnd, image, time)
 
 Given an image and time at which it was taken, track keypoints in it.
 After tracking, decide if the system needs a new Keyframe added to the map.
 If it is the first image to be tracked, then Keyframe is always needed.
 
-# Returns:
+# Returns
 
 `true` if the system needs a new Keyframe, otherwise `false`.
 """
@@ -71,19 +69,15 @@ function track!(fe::FrontEnd, image, time, visualizer)
     end
 
     @debug "Pose $(fe.current_frame.id) WC: $(fe.current_frame.wc[1:3, 4])"
-    # vimage = RGB{Float64}.(fe.current_image)
-    # draw_keypoints!(vimage, fe.current_frame)
-    # Images.save("/home/pxl-th/projects/slam-data/images/frame-$(fe.current_frame.id).png", vimage)
     is_kf_required
 end
 
-function track_mono!(fe::FrontEnd, image, image_time, visualizer)
+function track_mono!(fe::FrontEnd, image, image_time, slam_io)
     preprocess!(fe, image)
     fe.current_frame.id == 1 && return true
     # Apply motion model & update current Frame pose.
-    set_wc!(
-        fe.current_frame, fe.motion_model(fe.current_frame.wc, image_time),
-        visualizer)
+    new_pose = fe.motion_model(fe.current_frame.wc, image_time)
+    set_wc!(fe.current_frame, new_pose, slam_io)
 
     t1 = time()
     klt_tracking!(fe)
@@ -95,7 +89,7 @@ function track_mono!(fe::FrontEnd, image, image_time, visualizer)
             @warn "[Front End] NB KP < 50. Reset required."
             fe.params.reset_required = true
             return false
-        elseif check_ready_for_init!(fe, visualizer)
+        elseif check_ready_for_init!(fe, slam_io)
             @debug "[Front End] System ready for initialization."
             fe.params.vision_initialized = true
             return true
@@ -110,12 +104,12 @@ function track_mono!(fe::FrontEnd, image, image_time, visualizer)
     t1 = time()
     pose_5pt = compute_pose_5pt!(fe; min_parallax=5.0, use_motion_model=true)
     fe.map_manager.nb_keyframes > 2 && pose_5pt ≢ nothing &&
-        set_cw!(fe.current_frame, pose_5pt, visualizer)
+        set_cw!(fe.current_frame, pose_5pt, slam_io)
     t2 = time()
     @debug "[FE] 5PT Pose ($(t2 - t1) sec)."
 
     t1 = time()
-    compute_pose!(fe, visualizer)
+    compute_pose!(fe, slam_io)
     t2 = time()
     @debug "[FE] Compute Pose ($(t2 - t1) sec)."
 
@@ -124,20 +118,18 @@ function track_mono!(fe::FrontEnd, image, image_time, visualizer)
 end
 
 """
-```julia
-compute_pose!(fe::FrontEnd)
-```
+    compute_pose!(fe::FrontEnd)
 
 Compute pose of a current Frame using P3P Ransac algorithm.
 Pose is computed from the triangulated Keypoints (MapPoints) that are visible
 in this frame.
 
-# Returns:
+# Returns
 
 `true` if the pose was successfully computed and applied to current Frame,
 otherwise `false`.
 """
-function compute_pose!(fe::FrontEnd, visualizer)
+function compute_pose!(fe::FrontEnd, slam_io)
     if fe.current_frame.nb_3d_kpts < 5
         @warn "[Front-End] Not enough 3D keypoints to compute P3P $(fe.current_frame.nb_3d_kpts)."
         return false
@@ -187,8 +179,7 @@ function compute_pose!(fe::FrontEnd, visualizer)
     end
 
     KP, inliers, error = model
-    set_cw!(
-        fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP), visualizer)
+    set_cw!(fe.current_frame, to_4x4(fe.current_frame.camera.iK * KP), slam_io)
     # Remove outliers after P3P.
     for (kpid, inlier) in zip(p3p_kpids, inliers)
         inlier || remove_obs_from_current_frame!(fe.map_manager, kpid)
@@ -212,8 +203,7 @@ function compute_pose!(fe::FrontEnd, visualizer)
         fe.current_frame.camera, fe.current_frame.cw,
         p3p_pixels, p3p_3d_points;
         iterations=10, show_trace=false,
-        repr_ϵ=fe.params.max_reprojection_error,
-    )
+        repr_ϵ=fe.params.max_reprojection_error)
     if length(p3p_3d_points) - n_outliers < 5 || res_error > init_error
         @warn "[FE] P3P BA too few inliers - resetting!"
         fe |> reset_frame!
@@ -224,19 +214,17 @@ function compute_pose!(fe::FrontEnd, visualizer)
         outlier && remove_obs_from_current_frame!(fe.map_manager, kpid)
     end
 
-    set_cw!(fe.current_frame, new_T, visualizer)
+    set_cw!(fe.current_frame, new_T, slam_io)
     true
 end
 
 """
-```julia
-compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
-```
+    compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
 
 Copmute pose for pixel correspondences using 5-point algorithm
 to recover essential matrix, then pose from it.
 
-# Arguments:
+# Arguments
 
 - `min_parallax`: Minimum parallax required between pixels in the current Frame
     and previous Keyframe to compute pose.
@@ -246,7 +234,7 @@ to recover essential matrix, then pose from it.
     to predict next pose from previous frame.
     Otherwise, the computed pose will be "local".
 
-# Returns:
+# Returns
 
 If successfull, 4x4 pose matrix, that transforms points
 from previous Keyframe to current Frame.
@@ -344,9 +332,7 @@ function compute_pose_5pt!(fe::FrontEnd; min_parallax, use_motion_model)
 end
 
 """
-```julia
-check_ready_for_init!(fe::FrontEnd)
-```
+    check_ready_for_init!(fe::FrontEnd)
 
 Check if there is enough average rotation compensated parallax
 between current Frame and previous KeyFrame.
@@ -354,7 +340,7 @@ between current Frame and previous KeyFrame.
 Additionally, compute Essential matrix using 5-point Ransac algorithm
 to filter out outliers and check if there is enough inliers to proceed.
 """
-function check_ready_for_init!(fe::FrontEnd, visualizer)
+function check_ready_for_init!(fe::FrontEnd, slam_io)
     avg_parallax = compute_parallax(
         fe, fe.current_frame.kfid;
         compensate_rotation=false, median_parallax=false)
@@ -363,14 +349,12 @@ function check_ready_for_init!(fe::FrontEnd, visualizer)
     pose = compute_pose_5pt!(
         fe; min_parallax=fe.params.initial_parallax, use_motion_model=false)
     ready = pose ≢ nothing
-    ready && set_cw!(fe.current_frame, pose, visualizer)
+    ready && set_cw!(fe.current_frame, pose, slam_io)
     ready
 end
 
 """
-```julia
-check_new_kf_required(fe::FrontEnd)
-```
+    check_new_kf_required(fe::FrontEnd)
 
 Check if we need to insert a new KeyFrame into the Map.
 """
@@ -409,17 +393,14 @@ function check_new_kf_required(fe::FrontEnd)
 end
 
 """
-```julia
-compute_parallax(
-    fe::FrontEnd, current_frame_id;
-    compensate_rotation = true, only_2d = true, median_parallax = true,
-)
-```
+    compute_parallax(
+        fe::FrontEnd, current_frame_id;
+        compensate_rotation = true, only_2d = true, median_parallax = true)
 
 Compute parallax in pixels between current Frame
 and the provided `current_frame_id` Frame.
 
-# Arguments:
+# Arguments
 
 - `compensate_rotation::Bool`:
     Compensate rotation by computing relative rotation between
@@ -440,8 +421,7 @@ function compute_parallax(
     end
 
     current_rotation = compensate_rotation ?
-        get_Rcw(frame) * get_Rwc(fe.current_frame) :
-        SMatrix{3, 3, Float64}(I)
+        get_Rcw(frame) * get_Rwc(fe.current_frame) : SMatrix{3, 3, Float64, 9}(I)
 
     avg_parallax = 0.0
     n_parallax = 0
@@ -490,9 +470,7 @@ function preprocess!(fe::FrontEnd, image)
 end
 
 """
-```julia
-klt_tracking!(fe::FrontEnd)
-```
+    klt_tracking!(fe::FrontEnd)
 
 Track keypoints from previous frame to current frame.
 """
@@ -503,9 +481,7 @@ function klt_tracking!(fe::FrontEnd)
 end
 
 """
-```julia
-reset_frame!(fe::FrontEnd)
-```
+    reset_frame!(fe::FrontEnd)
 
 Reset current Frame in Front-End.
 """
@@ -523,16 +499,14 @@ function reset_frame!(fe::FrontEnd)
 end
 
 """
-```julia
-reset!(fe::FrontEnd)
-```
+    reset!(fe::FrontEnd)
 
 Reset Front-End.
 """
 function reset!(fe::FrontEnd)
     empty_pyr = LKPyramid(
         [Matrix{Gray{Float64}}(undef, 0, 0)],
-        nothing, nothing, nothing, nothing, nothing)
+        nothing, nothing, nothing, nothing, nothing, nothing)
     fe.previous_pyramid = empty_pyr
     fe.current_pyramid = empty_pyr
 end

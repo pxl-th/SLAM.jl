@@ -1,12 +1,10 @@
 """
-```julia
-MapManager(params::Params, frame::Frame, extractor::Extractor)
-```
+    MapManager(params::Params, frame::Frame, extractor::Extractor)
 
 Map Manager is responsible for managing Keyframes in the map
 as well as Mappoints.
 
-# Arguments:
+# Arguments
 
 - `current_frame::Frame`: Current frame that is shared throughout
     all the components in the system.
@@ -256,9 +254,7 @@ function remove_mappoint_obs!(m::MapManager, kpid::Int, kfid::Int)
 end
 
 """
-```julia
-update_mappoint!(m::MapManager, mpid, new_position)
-```
+    update_mappoint!(m::MapManager, mpid, new_position)
 
 Update position of a MapPoint.
 """
@@ -296,9 +292,7 @@ function update_mappoint!(m::MapManager, mpid, new_position)
 end
 
 """
-```julia
-update_frame_covisibility!(map_manager::MapManager, frame::Frame)
-```
+    update_frame_covisibility!(map_manager::MapManager, frame::Frame)
 
 Update covisibility graph for the `frame`.
 This is done by going through all of the keypoints in the `frame`.
@@ -361,9 +355,7 @@ function update_frame_covisibility!(map_manager::MapManager, frame::Frame)
 end
 
 """
-```julia
-reset!(m::MapManager)
-```
+    reset!(m::MapManager)
 
 Reset map manager.
 """
@@ -378,9 +370,7 @@ function reset!(m::MapManager)
 end
 
 """
-```julia
-merge_mappoints(m::MapManager, prev_id, new_id)
-```
+    merge_mappoints(m::MapManager, prev_id, new_id)
 
 Merge `prev_id` Mappoint into `new_id` Mappoint.
 For "previous" observers, update mappoint and keypoint to the new.
@@ -437,9 +427,7 @@ function merge_mappoints(m::MapManager, prev_id, new_id)
 end
 
 """
-```julia
-optical_flow_matching!(map_manager, frame, from_pyramid, to_pyramid, stereo)
-```
+    optical_flow_matching!(map_manager, frame, from_pyramid, to_pyramid, stereo)
 
 Match keypoints in `frame` from `from_pyramid` to `to_pyramid`.
 This function is used when matching keypoints temporally from previous frame
@@ -461,8 +449,7 @@ or calibration pose (in stereo).
     Otherwise set to `false`.
 """
 function optical_flow_matching!(
-    map_manager::MapManager, frame::Frame,
-    from_pyramid::LKPyramid, to_pyramid::LKPyramid, stereo,
+    map_manager::MapManager, frame, from_pyramid, to_pyramid, stereo,
 )
     window_size = map_manager.params.window_size
     max_distance = map_manager.params.max_ktl_distance
@@ -476,8 +463,8 @@ function optical_flow_matching!(
     pixels3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
     displacements3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
 
-    i, i3d = 1, 1
     scale = 1.0 / 2.0^pyramid_levels_3d
+    i, i3d = 1, 1
     n_good = 0
 
     keypoints = stereo ? get_keypoints(frame) : values(frame.keypoints)
@@ -489,9 +476,7 @@ function optical_flow_matching!(
             continue
         end
 
-        mp = stereo ?
-            get_mappoint(map_manager, kp.id) :
-            map_manager.map_points[kp.id]
+        mp = stereo ? get_mappoint(map_manager, kp.id) : map_manager.map_points[kp.id]
         if mp ≡ nothing
             remove_mappoint_obs!(map_manager, kp.id, frame.kfid)
             continue
@@ -579,17 +564,15 @@ function optical_flow_matching!(
 end
 
 """
-```julia
-maybe_stereo_update!(
-    frame::Frame, kpid, new_position::Point2f; epipolar_error::Float64 = 2.0,
-)
-```
+    maybe_stereo_update!(
+        frame::Frame, kpid, new_position::Point2f; epipolar_error::Float64 = 2.0,
+    )
 
 Update stereo keypoint if the vertical distance between matched keypoints is
 less than `epipolar_error`. In this case, set y-coordinate equal
 to the left keypoint. Otherwise do nothing.
 
-# Returns:
+# Returns
 
 `true` if successfully updated, otherwise `false`.
 """

@@ -21,7 +21,7 @@ end
 Extractor(max_points, radius, grid_resolution, cell_size) =
     Extractor(max_points, BRIEF(;size=256), radius, grid_resolution, cell_size)
 
-function _shi_tomasi(image, n_keypoints::Int; min_response::Real = 1e-4)
+function _shi_tomasi(image, n_keypoints; min_response = 1e-4)
     corners = fill(false, size(image)...)
     responses = shi_tomasi(image)
     maxima = findlocalmaxima(responses)

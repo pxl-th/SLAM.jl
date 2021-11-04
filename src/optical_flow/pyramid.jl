@@ -22,8 +22,8 @@ struct LKPyramid{G, C}
     Iyx::G
     cache::C
 end
-has_cache(lk::LKPyramid{G, C}) where {G, C} = C ≢ Nothing
-has_gradients(lk::LKPyramid{G, C}) where {G, C} = G ≢ Nothing
+has_cache(::LKPyramid{G, C}) where {G, C} = C ≢ Nothing
+has_gradients(::LKPyramid{G, C}) where {G, C} = G ≢ Nothing
 
 function Base.copy!(dst::LKPyramid{G, C}, src::LKPyramid{G, C}) where {G, C}
     for (dl, sl) in zip(dst.layers, src.layers) copy!(dl, sl) end
