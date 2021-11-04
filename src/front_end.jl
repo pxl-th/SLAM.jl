@@ -203,8 +203,7 @@ function compute_pose!(fe::FrontEnd, slam_io)
         fe.current_frame.camera, fe.current_frame.cw,
         p3p_pixels, p3p_3d_points;
         iterations=10, show_trace=false,
-        repr_ϵ=fe.params.max_reprojection_error,
-    )
+        repr_ϵ=fe.params.max_reprojection_error)
     if length(p3p_3d_points) - n_outliers < 5 || res_error > init_error
         @warn "[FE] P3P BA too few inliers - resetting!"
         fe |> reset_frame!
@@ -396,8 +395,7 @@ end
 """
     compute_parallax(
         fe::FrontEnd, current_frame_id;
-        compensate_rotation = true, only_2d = true, median_parallax = true,
-    )
+        compensate_rotation = true, only_2d = true, median_parallax = true)
 
 Compute parallax in pixels between current Frame
 and the provided `current_frame_id` Frame.

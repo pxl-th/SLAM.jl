@@ -37,13 +37,17 @@ function Camera(
         fx, 0.0, 0.0,
         0.0, fy, 0.0,
         cx, cy, 1.0)
-    iK = K |> inv
-
     Camera(
-        fx, fy, cx, cy,
-        k1, k2, p1, p2,
-        K, iK, height, width,
-        Ti0, inv(SE3, Ti0))
+        fx, fy, cx, cy, k1, k2, p1, p2,
+        K, inv(K), height, width, Ti0, inv(SE3, Ti0))
+end
+
+function Camera(;
+    fx, fy, cx, cy, height, width,
+    k1 = 0.0, k2 = 0.0, p1 = 0.0, p2 = 0.0,
+    Ti0 = SMatrix{4, 4, Float64}(I),
+)
+    Camera(fx, fy, cx, cy, k1, k2, p1, p2, height, width; Ti0)
 end
 
 """

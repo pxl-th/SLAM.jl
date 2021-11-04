@@ -45,21 +45,21 @@ Params:
 end
 
 function to_4x4(m::SMatrix{3, 3, T, 9}) where T
-    SMatrix{4, 4, T}(
+    @inbounds SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
         0,       0,       0,       1)
 end
 function to_4x4(m::SMatrix{3, 4, T, 12}) where T
-    SMatrix{4, 4, T}(
+    @inbounds SMatrix{4, 4, T}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
         m[1, 4], m[2, 4], m[3, 4], 1)
 end
 function to_4x4(m, t)
-    SMatrix{4, 4, Float64}(
+    @inbounds SMatrix{4, 4, Float64}(
         m[1, 1], m[2, 1], m[3, 1], 0,
         m[1, 2], m[2, 2], m[3, 2], 0,
         m[1, 3], m[2, 3], m[3, 3], 0,
@@ -320,23 +320,6 @@ function reset!(sm::SlamManager)
     sm.front_end |> reset!
     sm.map_manager |> reset!
     @warn "[Slam Manager] Reset applied."
-end
-
-function draw_keypoints!(
-    image::Matrix{T}, frame::Frame; right::Bool = false,
-) where T <: RGB
-    radius = 2
-    for kp in values(frame.keypoints)
-        right && !kp.is_stereo && continue
-
-        pixel = (right && kp.is_stereo) ? kp.right_pixel : kp.pixel
-        in_image(frame.camera, pixel) || continue
-
-        color = kp.is_3d ? T(0, 0, 1) : T(0, 1, 0)
-        kp.is_retracked && (color = T(1, 0, 0);)
-        draw!(image, CirclePointRadius(to_cartesian(pixel), radius), color)
-    end
-    image
 end
 
 end

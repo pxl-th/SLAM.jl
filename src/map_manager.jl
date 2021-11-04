@@ -449,8 +449,7 @@ or calibration pose (in stereo).
     Otherwise set to `false`.
 """
 function optical_flow_matching!(
-    map_manager::MapManager, frame::Frame,
-    from_pyramid::LKPyramid, to_pyramid::LKPyramid, stereo,
+    map_manager::MapManager, frame, from_pyramid, to_pyramid, stereo,
 )
     window_size = map_manager.params.window_size
     max_distance = map_manager.params.max_ktl_distance
@@ -464,8 +463,8 @@ function optical_flow_matching!(
     pixels3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
     displacements3d = Vector{Point2f}(undef, frame.nb_3d_kpts)
 
-    i, i3d = 1, 1
     scale = 1.0 / 2.0^pyramid_levels_3d
+    i, i3d = 1, 1
     n_good = 0
 
     keypoints = stereo ? get_keypoints(frame) : values(frame.keypoints)
@@ -477,9 +476,7 @@ function optical_flow_matching!(
             continue
         end
 
-        mp = stereo ?
-            get_mappoint(map_manager, kp.id) :
-            map_manager.map_points[kp.id]
+        mp = stereo ? get_mappoint(map_manager, kp.id) : map_manager.map_points[kp.id]
         if mp ≡ nothing
             remove_mappoint_obs!(map_manager, kp.id, frame.kfid)
             continue
