@@ -1,3 +1,9 @@
+using StaticArrays
+using LinearAlgebra
+using Printf
+using Images
+using Manifolds
+
 using SLAM
 
 include("kitty.jl")
@@ -17,7 +23,6 @@ function kitty_slam(kitty_dir, save_dir, sequence, n_frames, stereo = true)
 
     camera = SLAM.Camera(;fx, fy, cx, cy, height, width)
     right_camera = SLAM.Camera(;fx, fy, cx, cy, height, width, Ti0=dataset.Ti0)
-
     params = Params(;
         stereo, do_local_bundle_adjustment=false, map_filtering=true)
 

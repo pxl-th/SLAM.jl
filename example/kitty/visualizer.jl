@@ -1,3 +1,6 @@
+using StaticArrays
+using Printf
+using Images
 using OrderedCollections: OrderedDict
 using GLMakie
 using SLAM
@@ -11,6 +14,7 @@ or to replay from ReplaySaver.
 # Usage:
 To use it in "live" preview mode, pass it as a keyword argument,
 when creating SlamManager:
+
 ```julia
 visualizer = Visualizer(;resolution=(900, 600), image_resolution=(370, 1226))
 SlamManager(params, camera; visualizer)
@@ -35,9 +39,8 @@ mutable struct Visualizer
 end
 
 """
-```julia
-Visualizer(;resolution, image_resolution)
-```
+    Visualizer(;resolution, image_resolution)
+
 # Arguments:
 - `resolution`: Initial resolution of the figure in `(width, height)` format.
 - `image_resolution`: Initial resolution of the figure in `(height, width)` format.
@@ -87,9 +90,8 @@ end
 Base.display(v::Visualizer) = Base.display(v.figure)
 
 """
-```julia
-set_image!(v::Visualizer, image)
-```
+    set_image!(v::Visualizer, image)
+
 Update image in the visualizer.
 It should have the same dimensions as the original.
 """
@@ -98,9 +100,8 @@ function set_image!(v::Visualizer, image)
 end
 
 """
-```julia
-set_position!(v::Visualizer, position)
-```
+    set_position!(v::Visualizer, position)
+
 Add new position to the camera positions. This updates the plot immediately.
 """
 function set_position!(v::Visualizer, position)
@@ -109,9 +110,8 @@ function set_position!(v::Visualizer, position)
 end
 
 """
-```julia
-set_frame_wc!(v::Visualizer, frame_id, wc)
-```
+    set_frame_wc!(v::Visualizer, frame_id, wc)
+
 Add new frame `wc` to the visualizer queue.
 This is used when other threads are updating the visualizer.
 The queue is processed in `process_frame_wc!` method.
@@ -125,9 +125,8 @@ function set_frame_wc!(v::Visualizer, frame_id, wc)
 end
 
 """
-```julia
-process_frame_wc!(v::Visualizer)
-```
+    process_frame_wc!(v::Visualizer)
+
 Process pose queue. This updates the plot immediately.
 """
 function process_frame_wc!(v::Visualizer)

@@ -1,9 +1,3 @@
-using StaticArrays
-using LinearAlgebra
-using Printf
-using Images
-using Manifolds
-
 @inline function parse_matrix(line)
     m = parse.(Float64, split(line, " "))
     SMatrix{4, 4, Float64}(m..., 0, 0, 0, 1)'

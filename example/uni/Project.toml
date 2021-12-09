@@ -1,0 +1,5 @@
+[deps]
+Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+SLAM = "19785598-f67e-4679-8628-98de2a9de9c8"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+VideoIO = "d6d074c3-1acf-5d4c-9a43-ef38773959a2"
