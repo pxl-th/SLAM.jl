@@ -53,9 +53,10 @@ and map filtering that removes low-information Keyframes from the map.
 - `exit_required::Bool`: Whether the estimator should end its work and exit.
 - `queue_lock:ReentrantLock`: Lock for the queue.
 """
-mutable struct Estimator
+mutable struct Estimator{V}
     map_manager::MapManager
     params::Params
+    slam_io::V
 
     frame_queue::Vector{Frame}
     new_kf_available::Bool
@@ -64,9 +65,9 @@ mutable struct Estimator
     queue_lock::ReentrantLock
 end
 
-function Estimator(map_manager::MapManager, params::Params)
+function Estimator(map_manager::MapManager, params::Params, slam_io)
     Estimator(
-        map_manager, params, Frame[],
+        map_manager, params, slam_io, Frame[],
         false, false, ReentrantLock())
 end
 
@@ -265,14 +266,14 @@ function _get_ba_parameters(
 end
 
 function _update_ba_parameters!(
-    map_manager::MapManager, cache::LocalBACache, current_kfid,
+    map_manager::MapManager, cache::LocalBACache, current_kfid, slam_io,
 )
     points_shift = length(cache.poses_remap) * 6
 
     for (i, kfid) in enumerate(cache.poses_remap)
         p = (i - 1) * 6
         kf = get_keyframe(map_manager, kfid)
-        set_cw_ba!(kf, @view(cache.θ[(p + 1):(p + 6)]))
+        set_cw_ba!(kf, @view(cache.θ[(p + 1):(p + 6)]), slam_io)
     end
 
     for i in 1:length(cache.observations)
@@ -336,7 +337,8 @@ function local_bundle_adjustment!(estimator::Estimator, new_frame::Frame)
 
     lock(estimator.map_manager.map_lock)
     try
-        _update_ba_parameters!(estimator.map_manager, cache, new_frame.kfid)
+        _update_ba_parameters!(
+            estimator.map_manager, cache, new_frame.kfid, estimator.slam_io)
     catch e
         showerror(stdout, e); println()
         display(stacktrace(catch_backtrace())); println()

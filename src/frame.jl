@@ -443,9 +443,9 @@ function get_wc_ba(f::Frame)::NTuple{6, Float64}
     end
 end
 
-function set_cw_ba!(f::Frame, θ)
+function set_cw_ba!(f::Frame, θ, slam_io)
     lock(f.pose_lock) do
-        set_cw!(f, to_4x4(RotZYX(θ[1:3]...), θ[4:6]))
+        set_cw!(f, to_4x4(RotZYX(θ[1:3]...), θ[4:6]), slam_io)
     end
 end
 

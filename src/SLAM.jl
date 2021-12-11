@@ -162,7 +162,7 @@ function SlamManager(params, camera; right_camera = nothing, slam_io = nothing)
     map_manager = MapManager(params, frame, extractor)
     front_end = FrontEnd(params, frame, map_manager)
 
-    mapper = Mapper(params, map_manager, frame)
+    mapper = Mapper(params, map_manager, frame, slam_io)
     mapper_thread = Threads.@spawn run!(mapper)
     @debug "[SM] Launched mapper thread."
 

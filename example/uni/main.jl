@@ -4,6 +4,7 @@ using VideoIO
 using SLAM
 
 function main()
+    save_dir = "/home/pxl-th/projects/slam-uni"
     vpath = "/home/pxl-th/Videos/MOV_0014.MOV"
 
     focal = 910.0
@@ -18,7 +19,11 @@ function main()
     slam_manager = SlamManager(params, camera; slam_io=saver)
     slam_manager_thread = Threads.@spawn run!(slam_manager)
 
-    for frame in VideoIO.openvideo(vpath)
+    t1 = time()
+
+    for (i, frame) in enumerate(VideoIO.openvideo(vpath))
+        i == 150 && break
+
         frame = Gray{Float64}.(frame)
         add_image!(slam_manager, frame, timestamp)
         timestamp += δt
@@ -45,4 +50,3 @@ function main()
     SLAM.save(saver, save_dir)
     @info "Saved ReplaySaver."
 end
-main()

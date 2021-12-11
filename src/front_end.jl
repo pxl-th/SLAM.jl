@@ -55,11 +55,11 @@ If it is the first image to be tracked, then Keyframe is always needed.
 
 `true` if the system needs a new Keyframe, otherwise `false`.
 """
-function track!(fe::FrontEnd, image, time, visualizer)
+function track!(fe::FrontEnd, image, time, slam_io)
     is_kf_required = false
     lock(fe.map_manager.map_lock)
     try
-        is_kf_required = track_mono!(fe, image, time, visualizer)
+        is_kf_required = track_mono!(fe, image, time, slam_io)
         is_kf_required && create_keyframe!(fe.map_manager, image)
     catch e
         showerror(stdout, e)

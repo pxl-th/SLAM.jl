@@ -164,7 +164,8 @@ function replay_kitty(kitty_dir, save_dir, sequence, n_frames)
 
     saver = ReplaySaver()
     SLAM.load!(saver, save_dir)
-    @assert length(saver.positions) == n_frames - 1
+    @show length(saver.positions), n_frames
+    @assert length(saver.positions) == n_frames
 
     resolution = (900, 600)
     image_resolution = (1241, 376)

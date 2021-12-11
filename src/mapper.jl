@@ -21,8 +21,8 @@ mutable struct Mapper
     queue_lock::ReentrantLock
 end
 
-function Mapper(params::Params, map_manager::MapManager, frame::Frame)
-    estimator = Estimator(map_manager, params)
+function Mapper(params::Params, map_manager::MapManager, frame::Frame, slam_io)
+    estimator = Estimator(map_manager, params, slam_io)
     estimator_thread = Threads.@spawn run!(estimator)
     @debug "[MP] Launched estimator thread."
     empty_pyr = LKPyramid(

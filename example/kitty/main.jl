@@ -24,7 +24,7 @@ function kitty_slam(kitty_dir, save_dir, sequence, n_frames, stereo = true)
     camera = SLAM.Camera(;fx, fy, cx, cy, height, width)
     right_camera = SLAM.Camera(;fx, fy, cx, cy, height, width, Ti0=dataset.Ti0)
     params = Params(;
-        stereo, do_local_bundle_adjustment=false, map_filtering=true)
+        stereo, do_local_bundle_adjustment=true, map_filtering=true)
 
     saver = ReplaySaver()
     slam_manager = SlamManager(params, camera; right_camera, slam_io=saver)

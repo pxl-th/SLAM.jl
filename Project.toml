@@ -25,6 +25,7 @@ Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SparseDiffTools = "47a9eef4-7e08-11e9-0b38-333d64bd3804"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+VideoIO = "d6d074c3-1acf-5d4c-9a43-ef38773959a2"
 
 [compat]
 BSON = "0.3"
