@@ -9,6 +9,14 @@ Simultaneous Localization and Mapping.
 
 ![KITTY 05 sequence demo](res/kitty-05.gif)
 
+## Features
+
+- Monocular/stereo;
+- Multithreaded;
+- Optical flow tracking / PnP tracking;
+- Bundle-adjustment;
+- Keypoints re-tracking.
+
 ## Install
 
 ```bash
